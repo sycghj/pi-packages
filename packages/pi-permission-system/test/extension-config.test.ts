@@ -1,3 +1,4 @@
+import "./extension-config-auto-mode.test";
 import { describe, expect, it } from "vitest";
 
 import type { PermissionSystemExtensionConfig } from "#src/extension-config";
@@ -94,6 +95,14 @@ describe("normalizePermissionSystemConfig", () => {
       permissionReviewLog: false,
       yoloMode: true,
       doublePressToConfirm: true,
+      autoMode: {
+        enabled: false,
+        provider: "new-provider",
+        modelId: "deepseek-v4-flash",
+        maxTokens: 256,
+        maxRetries: 2,
+        fallback: "ask",
+      },
     });
   });
 

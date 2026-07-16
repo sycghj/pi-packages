@@ -10,6 +10,7 @@ import { applyPermissionGate } from "#src/permission-gate";
 import type { ScopedPermissionResolver } from "#src/permission-resolver";
 import type { SessionApprovalRecorder } from "#src/session-approval-recorder";
 import type { PermissionCheckResult } from "#src/types";
+import type { AutoAskDecider } from "./auto-ask-decider";
 import type { GateDescriptor, GateResult } from "./descriptor";
 import { isGateBypass } from "./descriptor";
 import { buildDecisionEvent, deriveResolution } from "./helpers";
@@ -32,6 +33,7 @@ export class GateRunner {
     private readonly recorder: SessionApprovalRecorder,
     private readonly prompter: AskEscalator,
     private readonly reporter: DecisionReporter,
+    private readonly autoDecider?: AutoAskDecider,
   ) {}
 
   /**
@@ -140,17 +142,25 @@ export class GateRunner {
 
     let autoApproved = false;
     let confirmationUnavailable = false;
+    const autoDecision = await this.tryAutoDecide(
+      descriptor,
+      check,
+      agentName,
+      toolCallId,
+    );
     const gateResult = await applyPermissionGate({
       state: check.state,
       sessionApproval: descriptor.sessionApproval?.toGateApproval(),
       promptForApproval: async () => {
-        const decision = await this.prompter.escalate({
-          requestId: toolCallId,
-          ...descriptor.promptDetails,
-          ...(descriptor.sessionApproval
-            ? { sessionApproval: descriptor.sessionApproval.toForwardedData() }
-            : {}),
-        });
+        const decision =
+          autoDecision ??
+          (await this.prompter.escalate({
+            requestId: toolCallId,
+            ...descriptor.promptDetails,
+            ...(descriptor.sessionApproval
+              ? { sessionApproval: descriptor.sessionApproval.toForwardedData() }
+              : {}),
+          }));
         autoApproved = decision.autoApproved === true;
         confirmationUnavailable = decision.confirmationUnavailable === true;
         return decision;
@@ -193,5 +203,27 @@ export class GateRunner {
     }
 
     return { action: "allow" };
+  }
+
+  private async tryAutoDecide(
+    descriptor: GateDescriptor,
+    check: PermissionCheckResult,
+    agentName: string | null,
+    toolCallId: string,
+  ): Promise<PermissionPromptDecision | null> {
+    if (check.state !== "ask" || !this.autoDecider) {
+      return null;
+    }
+    try {
+      return await this.autoDecider.decide({
+        agentName,
+        check,
+        input: descriptor.input,
+        prompt: descriptor.promptDetails,
+        toolCallId,
+      });
+    } catch {
+      return null;
+    }
   }
 }

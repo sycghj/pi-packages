@@ -9,6 +9,7 @@ import {
   getProjectConfigPath,
 } from "./config-paths";
 import {
+  type AutoModeConfig,
   type ShellToolsConfig,
   type UnifiedPermissionConfig,
   unifiedConfigSchema,
@@ -21,7 +22,7 @@ import { isDenyWithReason, isPermissionState } from "./types";
 // the single source of truth) and re-exported so existing importers keep their
 // import path. All fields are optional so partial configs merge before
 // defaults are applied downstream.
-export type { ShellToolsConfig, UnifiedPermissionConfig };
+export type { AutoModeConfig, ShellToolsConfig, UnifiedPermissionConfig };
 
 export interface UnifiedConfigLoadResult {
   config: UnifiedPermissionConfig;
@@ -194,12 +195,12 @@ function formatConfigIssues(error: ZodError): string[] {
  * - `permission` is deep-shallow merged (surface-level object maps are shallow-merged).
  * - Scalar fields (debugLog, permissionReviewLog, yoloMode) are replaced when
  *   present in the override.
+ * - Runtime object fields (autoMode) are replaced when present in the override.
  * - Array fields (piInfrastructureReadPaths) replace the base when present in
  *   the override (override-wins, same as scalars).
  */
-// Scalar knobs merged by override-replaces-base; keep in sync with
-// PermissionSystemExtensionConfig booleans (debugLog, permissionReviewLog,
-// yoloMode, doublePressToConfirm).
+// Runtime object knobs are override-replaces-base; keep in sync with
+// PermissionSystemExtensionConfig object fields (autoMode).
 export function mergeUnifiedConfigs(
   base: UnifiedPermissionConfig,
   override: UnifiedPermissionConfig,
@@ -228,6 +229,11 @@ export function mergeUnifiedConfigs(
     if (value !== undefined) {
       merged[key] = value;
     }
+  }
+
+  const autoMode = override.autoMode ?? base.autoMode;
+  if (autoMode !== undefined) {
+    merged.autoMode = autoMode;
   }
 
   // Array fields: override replaces base when defined

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
+  AutoModeConfig,
   ShellToolsConfig,
   UnifiedPermissionConfig,
 } from "./config-loader";
@@ -21,6 +22,8 @@ export interface PermissionSystemExtensionConfig {
   toolInputPreviewMaxLength?: number;
   /** Max length of inline pattern/path summaries (grep/find/ls) in permission prompts. Defaults to 80. */
   toolTextSummaryMaxLength?: number;
+  /** Optional LLM auto-classifier for ask-state checks. Disabled by default. */
+  autoMode: Required<AutoModeConfig>;
   /** Non-bash tools that carry shell semantics, keyed by tool name. */
   shellTools?: ShellToolsConfig;
 }
@@ -30,6 +33,14 @@ export const DEFAULT_EXTENSION_CONFIG: PermissionSystemExtensionConfig = {
   permissionReviewLog: true,
   yoloMode: false,
   doublePressToConfirm: true,
+  autoMode: {
+    enabled: false,
+    provider: "new-provider",
+    modelId: "deepseek-v4-flash",
+    maxTokens: 256,
+    maxRetries: 2,
+    fallback: "ask",
+  },
 };
 
 function resolveExtensionRoot(moduleUrl = import.meta.url): string {
@@ -62,6 +73,14 @@ export function normalizePermissionSystemConfig(
     permissionReviewLog: raw.permissionReviewLog !== false,
     yoloMode: raw.yoloMode === true,
     doublePressToConfirm: raw.doublePressToConfirm !== false,
+    autoMode: {
+      enabled: raw.autoMode?.enabled === true,
+      provider: raw.autoMode?.provider ?? "new-provider",
+      modelId: raw.autoMode?.modelId ?? "deepseek-v4-flash",
+      maxTokens: raw.autoMode?.maxTokens ?? 256,
+      maxRetries: raw.autoMode?.maxRetries ?? 2,
+      fallback: raw.autoMode?.fallback ?? "ask",
+    },
   };
   if (raw.piInfrastructureReadPaths !== undefined) {
     result.piInfrastructureReadPaths = raw.piInfrastructureReadPaths;

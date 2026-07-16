@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getPackageDir } from "@earendil-works/pi-coding-agent";
 import { warmBashParser } from "./access-intent/bash/parser";
+import { createAutoAskDecider } from "./auto-mode-composition";
 import { buildAccessIntentForSurface } from "./access-intent/input-normalizer";
 import { AuthorizerSelection } from "./authority/authorizer-selection";
 import {
@@ -221,11 +222,13 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   );
 
   const reporter = new GateDecisionReporter(logger, pi.events);
+  const autoAskDecider = createAutoAskDecider(configStore, session);
   const gateRunner = new GateRunner(
     resolver,
     sessionRules,
     authorizerSelection,
     reporter,
+    autoAskDecider,
   );
   const toolCallGatePipeline = new ToolCallGatePipeline(
     resolver,

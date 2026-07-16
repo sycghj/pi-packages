@@ -8,6 +8,7 @@ import type { DecisionReporter } from "#src/decision-reporter";
 import type { DenialContext } from "#src/denial-messages";
 import type { GateDescriptor } from "#src/handlers/gates/descriptor";
 import { GateRunner } from "#src/handlers/gates/runner";
+import type { AutoAskDecider } from "#src/handlers/gates/auto-ask-decider";
 import type { SkillInputGateInputs } from "#src/handlers/gates/skill-input-gate-pipeline";
 import type { ToolCallGateInputs } from "#src/handlers/gates/tool-call-gate-pipeline";
 import type { ToolCallContext } from "#src/handlers/gates/types";
@@ -97,6 +98,7 @@ export function makeGateRunner(
     resolve?: ScopedPermissionResolver["resolve"];
     recordSessionApproval?: SessionApprovalRecorder["recordSessionApproval"];
     escalate?: AskEscalator["escalate"];
+    autoDecide?: AutoAskDecider["decide"];
     reporter?: Partial<DecisionReporter>;
   } = {},
 ) {
@@ -121,12 +123,14 @@ export function makeGateRunner(
     { recordSessionApproval },
     { escalate },
     reporter,
+    overrides.autoDecide ? { decide: overrides.autoDecide } : undefined,
   );
   return {
     runner,
     deps: {
       resolve,
       recordSessionApproval,
+      autoDecide: overrides.autoDecide,
       escalate,
       reporter,
     },

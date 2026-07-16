@@ -112,6 +112,23 @@ Within a surface map like `bash` or `mcp`, **last matching rule wins** — put b
 
 The optional `shellTools` field records which non-`bash` tools carry shell semantics (e.g. an `exec_command` tool that replaces native `bash`), so they are gated at full parity with native `bash` — see [docs/configuration.md](docs/configuration.md#shelltools--gating-aliased-shell-tools).
 
+The optional `autoMode` field can resolve `ask` decisions with an LLM classifier before the UI prompt appears. Deterministic `allow` and `deny` policy results bypass the classifier entirely, so tool safety, path safety, extension-tool extraction, and hard denials remain policy-driven by this permission system rather than by a hardcoded tool allowlist. It is disabled by default:
+
+```jsonc
+{
+  "autoMode": {
+    "enabled": false,
+    "provider": "new-provider",
+    "modelId": "deepseek-v4-flash",
+    "maxTokens": 256,
+    "maxRetries": 2,
+    "fallback": "ask"
+  }
+}
+```
+
+When enabled, classifier output `<block>no</block>` auto-approves the pending `ask`; `<block>yes</block>` denies it. Transient HTTP failures and malformed classifier output retry up to `maxRetries` times. If the classifier cannot start (missing model/auth) or all attempts fail, `fallback: "ask"` returns to the normal UI prompt, while `fallback: "deny"` blocks with a fail-closed denial.
+
 For the full reference — all surfaces, runtime knobs, per-agent overrides, merge semantics, and common recipes — see [docs/configuration.md](docs/configuration.md).
 
 ## Upgrading

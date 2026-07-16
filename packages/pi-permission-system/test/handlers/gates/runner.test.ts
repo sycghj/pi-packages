@@ -1,3 +1,4 @@
+import "./runner-auto-mode.test";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DenialContext } from "#src/denial-messages";

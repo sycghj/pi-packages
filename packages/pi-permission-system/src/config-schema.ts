@@ -126,6 +126,41 @@ const shellToolAliasSchema = z
       "Maps one shell-aliased tool to the input arguments holding its command and (optionally) its working directory.",
   });
 
+const autoModeSchema = z
+  .strictObject({
+    enabled: z.boolean().optional().meta({
+      description:
+        "Resolve ask-state permission checks with an LLM classifier before showing the UI prompt.",
+      default: false,
+    }),
+    provider: z.string().min(1).optional().meta({
+      description: "Model provider id for the auto classifier.",
+      default: "new-provider",
+    }),
+    modelId: z.string().min(1).optional().meta({
+      description: "Model id for the auto classifier.",
+      default: "deepseek-v4-flash",
+    }),
+    maxTokens: z.number().int().min(1).optional().meta({
+      description: "Maximum output tokens for the classifier response.",
+      default: 256,
+    }),
+    maxRetries: z.number().int().min(0).optional().meta({
+      description:
+        "Maximum retry attempts after the first classifier request fails.",
+      default: 2,
+    }),
+    fallback: z.enum(["ask", "deny"]).optional().meta({
+      description:
+        "Decision when classifier attempts are exhausted or cannot start.",
+      default: "ask",
+    }),
+  })
+  .meta({
+    description:
+      "Optional LLM classifier for ask-state permission checks only. Allow and deny policy decisions bypass it.",
+  });
+
 const shellToolsSchema = z
   .record(
     z.string().min(1).meta({
@@ -206,6 +241,7 @@ export const unifiedConfigSchema = z
         "Additional directories to auto-allow for reads as Pi infrastructure, bypassing the `external_directory` gate.\n\nThe extension auto-discovers the global node_modules root (walks up from the extension's install path; falls back to `npm root -g` from a dev checkout), Pi's own install directory (via the coding-agent `getPackageDir()` API), `agentDir`, `agentDir/git`, and project-local `.pi/npm/` and `.pi/git/`. Add entries here for edge cases where auto-discovery is insufficient (e.g. custom `npmCommand` pointing to pnpm).\n\nSupports `~`/`$HOME` expansion. Entries may be plain directory prefixes or wildcard patterns using `*` (matches any characters, including `/`) and `?` (matches exactly one character). `**` and `*` are equivalent — both cross directory boundaries.\n\nOn Windows, matching is case-insensitive and tolerant of either path separator.",
       default: [],
     }),
+    autoMode: autoModeSchema.optional(),
     permission: permissionSchema.optional(),
     shellTools: shellToolsSchema.optional(),
   })
@@ -231,6 +267,9 @@ export type FlatPermissionConfig = z.infer<typeof permissionSchema>;
 
 /** The `shellTools` map: tool name → shell-alias argument mapping. */
 export type ShellToolsConfig = z.infer<typeof shellToolsSchema>;
+
+/** The optional auto-mode classifier config. */
+export type AutoModeConfig = z.infer<typeof autoModeSchema>;
 
 /** The raw config file shape after validation (all fields optional). */
 export type UnifiedPermissionConfig = z.infer<typeof unifiedConfigSchema>;
