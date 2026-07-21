@@ -117,7 +117,7 @@ export class SubagentSession {
       : prompt;
 
     try {
-      await session.prompt(effectivePrompt);
+      await promptWithAnthropicSseRetry(session, effectivePrompt, opts.signal);
       this.meta.lifecycle.completed({
         sessionDir: this.meta.sessionDir,
         agentName: this.meta.agentName,
@@ -141,7 +141,7 @@ export class SubagentSession {
     const cleanupAbort = forwardAbortSignal(session, signal);
 
     try {
-      await session.prompt(prompt);
+      await promptWithAnthropicSseRetry(session, prompt, signal);
     } finally {
       collector.unsubscribe();
       cleanupAbort();
@@ -198,7 +198,69 @@ export class SubagentSession {
   }
 }
 
-// ── Private turn-loop helpers ───────────────────────────────────────────────────
+function getRetrySettings(session: AgentSession): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
+  const candidate = session as AgentSession & {
+    settingsManager?: { getRetrySettings?: () => { enabled: boolean; maxRetries: number; baseDelayMs: number } };
+  };
+  return candidate.settingsManager?.getRetrySettings?.() ?? { enabled: true, maxRetries: 3, baseDelayMs: 2000 };
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("Retry cancelled"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAnthropicMalformedSseError(message: unknown): boolean {
+  if (!message || typeof message !== "object" || !("role" in message)) return false;
+  const msg = message as { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
+  return (
+    msg.role === "assistant" &&
+    msg.stopReason === "error" &&
+    typeof msg.errorMessage === "string" &&
+    msg.errorMessage.includes("Could not parse Anthropic SSE event")
+  );
+}
+
+function getLastAnthropicMalformedSseError(session: AgentSession): string | undefined {
+  const last = session.messages[session.messages.length - 1];
+  if (!isAnthropicMalformedSseError(last)) return undefined;
+  return (last as { errorMessage: string }).errorMessage;
+}
+
+function removeLastAssistantMessage(session: AgentSession): void {
+  session.messages.pop();
+}
+
+async function promptWithAnthropicSseRetry(
+  session: AgentSession,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const settings = getRetrySettings(session);
+  let attempt = 0;
+
+  while (true) {
+    await session.prompt(prompt);
+    const errorMessage = getLastAnthropicMalformedSseError(session);
+    if (!errorMessage) return;
+    if (!settings.enabled || attempt >= settings.maxRetries) throw new Error(errorMessage);
+
+    removeLastAssistantMessage(session);
+    const delayMs = settings.baseDelayMs * 2 ** attempt;
+    attempt++;
+    await sleep(delayMs, signal);
+  }
+}
 
 /**
  * Subscribe to a session and collect the last assistant message text.
