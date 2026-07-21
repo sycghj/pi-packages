@@ -126,6 +126,34 @@ describe("SubagentSession — runTurnLoop response capture", () => {
     expect(result.responseText).toBe("hello world");
   });
 
+  it("retries malformed Anthropic SSE assistant errors before completing", async () => {
+    const { session } = createSession("unused");
+    Object.assign(session, {
+      settingsManager: {
+        getRetrySettings: () => ({ enabled: true, maxRetries: 1, baseDelayMs: 0 }),
+      },
+    });
+    session.prompt = vi.fn(async () => {
+      if (session.prompt.mock.calls.length === 1) {
+        session.messages.push({
+          role: "assistant",
+          stopReason: "error",
+          errorMessage:
+            "Could not parse Anthropic SSE event content_block_delta: Unexpected end of JSON input; data=; raw=event: content_block_delta\\ndata:",
+          content: [],
+        });
+        return;
+      }
+      session.messages.push({ role: "assistant", content: [{ type: "text", text: "RECOVERED" }] });
+    });
+
+    const { sub } = makeSubagentSession(session);
+    const result = await sub.runTurnLoop("go", {});
+
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    expect(result.responseText).toBe("RECOVERED");
+  });
+
   it("prepends parentContext to the prompt", async () => {
     const { session } = createSession("DONE");
     const { sub } = makeSubagentSession(session, { parentContext: "CTX\n" });
