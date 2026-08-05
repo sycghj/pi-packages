@@ -20,8 +20,4 @@ export class InMemoryEvidenceRecorder implements EvidenceRecorder {
   record(evidence: EvidenceRecord): void {
     this.records.push({ ...evidence });
   }
-
-  entries(): EvidenceRecord[] {
-    return this.records.map((entry) => ({ ...entry }));
-  }
 }

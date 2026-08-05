@@ -28,6 +28,8 @@ export type LearnedEvaluation =
 export class LearnedGrantEvaluator {
   constructor(private readonly store: SessionLearningStore) {}
 
+  // Called through Pick<LearnedGrantEvaluator, "evaluateAsk"> in GateRunner; Fallow cannot trace interface-shaped consumers.
+  // fallow-ignore-next-line unused-class-member
   evaluateAsk(
     request: EvaluationRequest & { readonly check: AskPermissionCheck },
   ): LearnedEvaluation {
@@ -38,14 +40,5 @@ export class LearnedGrantEvaluator {
       grantId: reservation.grantId,
       reservationId: reservation.reservationId,
     };
-  }
-
-  evaluate(request: EvaluationRequest): LearnedEvaluation {
-    if (request.check.state !== "ask") {
-      throw new Error("Learned grants can only evaluate ask checks.");
-    }
-    return this.evaluateAsk(
-      request as EvaluationRequest & { check: AskPermissionCheck },
-    );
   }
 }

@@ -57,13 +57,6 @@ export function classifierRequestInit(
   };
 }
 
-export function parseClassifierDecision(
-  text: string,
-): PermissionPromptDecision | null {
-  const result = parseClassifierResult(text);
-  return result.kind === "decision" ? result.decision : null;
-}
-
 export function parseClassifierResult(text: string): ClassifierParseResult {
   const match = /<block>\s*(yes|no)(?:\s*<\/block>)?/i.exec(text);
   if (!match) return { kind: "invalid" };

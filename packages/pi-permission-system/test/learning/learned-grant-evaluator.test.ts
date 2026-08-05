@@ -45,17 +45,4 @@ describe("LearnedGrantEvaluator", () => {
       }),
     ).toEqual({ action: "miss" });
   });
-
-  it("does not expose an API that accepts allow or deny checks", () => {
-    expect(() =>
-      evaluator().evaluate({
-        check: { state: "deny" },
-        intentFingerprint: "sha256:abc",
-        gateSurface: "bash",
-        source: "tool_call",
-        agentName: "agent-1",
-        toolCallId: "tc-1",
-      }),
-    ).toThrow(/ask/i);
-  });
 });
