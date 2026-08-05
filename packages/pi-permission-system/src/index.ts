@@ -1,10 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getPackageDir } from "@earendil-works/pi-coding-agent";
 import { warmBashParser } from "./access-intent/bash/parser";
-import {
-  buildAccessIntentForSurface,
-  buildResolvedIntentFromMatchValues,
-} from "./access-intent/input-normalizer";
+import { buildResolvedIntentFromMatchValues } from "./access-intent/input-normalizer";
 import { AuthorizerRegistry } from "./authority/authorizer-registry";
 import { AuthorizerSelection } from "./authority/authorizer-selection";
 import {

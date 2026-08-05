@@ -199,7 +199,7 @@ export class SubagentSession {
 }
 
 function getRetrySettings(session: AgentSession): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
-  const candidate = session as AgentSession & {
+  const candidate = session as unknown as {
     settingsManager?: { getRetrySettings?: () => { enabled: boolean; maxRetries: number; baseDelayMs: number } };
   };
   return candidate.settingsManager?.getRetrySettings?.() ?? { enabled: true, maxRetries: 3, baseDelayMs: 2000 };
@@ -249,7 +249,7 @@ async function promptWithAnthropicSseRetry(
   const settings = getRetrySettings(session);
   let attempt = 0;
 
-  while (true) {
+  for (;;) {
     await session.prompt(prompt);
     const errorMessage = getLastAnthropicMalformedSseError(session);
     if (!errorMessage) return;

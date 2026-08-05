@@ -225,7 +225,8 @@ While the authorizer chain routes an `ask` to a registered reviewer, **`autoMode
 
 **Deterministic `allow` and `deny` bypass the classifier entirely** — tool safety, path safety, extension-tool extraction, and hard denials remain policy-driven by this permission system rather than by a hardcoded tool allowlist.
 
-`autoMode` is **disabled by default**. Enable it only in user/global config; a project config must not enable it (project config can only tighten, never loosen).
+`autoMode` is **disabled by default**.
+Enable it only in user/global config; a project config must not enable it (project config can only tighten, never loosen).
 
 ```jsonc
 {
@@ -243,16 +244,16 @@ While the authorizer chain routes an `ask` to a registered reviewer, **`autoMode
 
 Fields:
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `enabled` | `false` | Off by default. Only user/global config may set `true`. |
-| `provider` | — | LLM provider id (e.g. `anthropic`). |
-| `modelId` | — | Model id for the classifier. |
-| `maxTokens` | — | Max tokens for the classifier response. |
-| `maxRetries` | — | Retry count on transient failure. |
-| `fallback` | `"ask"` | What happens when the classifier fails or abstains: `"ask"` (recommended, returns to the prompt) or `"deny"`. |
-| `twoStage.enabled` | `false` | Opt-in thinking-review second stage on a deny or malformed first-stage output. |
-| `twoStage.thinkingBudgetTokens` | — | Thinking budget for the second stage. |
+| Field                           | Default | Notes                                                                                                         |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `enabled`                       | `false` | Off by default. Only user/global config may set `true`.                                                       |
+| `provider`                      | —       | LLM provider id (e.g. `anthropic`).                                                                           |
+| `modelId`                       | —       | Model id for the classifier.                                                                                  |
+| `maxTokens`                     | —       | Max tokens for the classifier response.                                                                       |
+| `maxRetries`                    | —       | Retry count on transient failure.                                                                             |
+| `fallback`                      | `"ask"` | What happens when the classifier fails or abstains: `"ask"` (recommended, returns to the prompt) or `"deny"`. |
+| `twoStage.enabled`              | `false` | Opt-in thinking-review second stage on a deny or malformed first-stage output.                                |
+| `twoStage.thinkingBudgetTokens` | —       | Thinking budget for the second stage.                                                                         |
 
 **Safety floor:** high-risk matched patterns are marked `classifierApprovable: false` and never reach the classifier — they fall straight to the prompt (or deny per `fallback`).
 
