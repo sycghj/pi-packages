@@ -20,6 +20,8 @@ Load this skill when writing, debugging, or planning tests.
 - When mocking a class constructor with `vi.mock()`, use `vi.fn()` with no implementation — not `vi.fn(() => ({}))`.
   Arrow-function implementations are not constructable; `new MockClass()` throws `"is not a constructor"`.
 - When mocking `node:*` built-in modules with `vi.mock()`, include a `default` key mirroring the named exports — omitting it causes "No default export defined on the mock" errors.
+- A `vi.mock("node:*")` factory that returns an object literal *replaces* the module: every export it omits becomes `undefined`, so a later call to a sibling export (`lstatSync`, `tmpdir`) throws `TypeError` in unrelated tests in that file.
+  To stub one export and keep the rest, spread `await vi.importActual<typeof import("node:fs")>("node:fs")` in the factory and override only the target (Refs #645).
 - Import the module-under-test with a static top-level `import`, not a per-test `await import(...)` — Vitest hoists `vi.mock()`/`vi.hoisted()` above static imports, so the mock still applies.
   A per-test dynamic import of a module that transitively pulls heavy deps pays the transform/resolve cost inside each test's `testTimeout` window and can flake CI (Refs #554).
 
@@ -48,6 +50,7 @@ Load this skill when writing, debugging, or planning tests.
 
 - When testing code that uses `setInterval`, never use `vi.runAllTimersAsync()` — it loops infinitely.
   Use `vi.advanceTimersByTimeAsync(ms)` with a specific duration instead.
+- To observe not-yet-settled state, assert promise identity or gate with `Promise.withResolvers` — a `setTimeout(…, 0)` tick-count sleep silently false-greens when the code under test settles in the same tick (Refs #662).
 - Prefer reading `process.env` inside functions rather than capturing it as a module-level constant — `vi.stubEnv()` alone cannot change a constant already evaluated at import time.
   If a module-level constant is unavoidable, test it with `vi.resetModules()` + `await import(...)` inside the test body, and call `vi.unstubAllEnvs()` + `vi.resetModules()` in `afterEach`.
 
@@ -58,6 +61,8 @@ Load this skill when writing, debugging, or planning tests.
   When a weak assertion is necessary (third-party output, non-deterministic ordering), add a comment explaining why.
 - When a test drives the code through a validation/parse step and the invalid-input fallback returns the same value a negative-path test asserts (e.g. a forwarded-response fixture missing a required field and a `denied` expectation both yield `{ approved: false, state: "denied" }`), a broken fixture false-greens the negative test.
   Assert the positive (non-fallback) path against the same fixture builder first — a malformed fixture then fails loudly there — or assert a discriminating field the fallback cannot produce.
+- When proving a guard test is not vacuous, build the probe to match the guard's exact predicate.
+  A near-miss probe (`void runRpcSession;` against a guard matching `runRpcSession(`) leaves the guard silent and looks like proof it is broken (Refs #678).
 - Prefer a concrete test asserting current (even imperfect) behavior over `test.todo`.
   A real assertion documents the limitation and lets a future fix flip the expectation.
 - When a test reveals a pre-existing bug rather than a wrong assumption, use `test.fails` to document the expected behavior and file a GitHub issue.

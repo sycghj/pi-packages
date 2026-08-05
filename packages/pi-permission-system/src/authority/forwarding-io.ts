@@ -12,11 +12,17 @@ import {
 import { isPermissionDecisionState } from "#src/authority/permission-dialog";
 import {
   createPermissionForwardingLocation,
+  type ForwardedAccessIntent,
   type ForwardedPermissionRequest,
   type ForwardedPermissionResponse,
+  type ForwardedPortablePath,
   type ForwardedSessionApproval,
   type PermissionForwardingLocation,
 } from "#src/authority/permission-forwarding";
+import {
+  OWNER_ONLY_DIRECTORY_MODE,
+  OWNER_ONLY_FILE_MODE,
+} from "#src/log-file-permissions";
 import type { PermissionUiPromptSource } from "#src/permission-events";
 import type { DebugReviewLogger } from "#src/session-logger";
 
@@ -67,6 +73,79 @@ function asForwardedSessionApproval(
   return { surface: candidate.surface, patterns: [...candidate.patterns] };
 }
 
+/**
+ * Narrow an unknown value to a `ForwardedAccessIntent`, or `undefined`.
+ *
+ * Tolerant read: the child-fixed access intent is optional (absent on an older
+ * child) and only accepted when fully well-formed — a string `surface`, an
+ * all-string `matchValues` array, a `string | null` `boundaryValue`, a string
+ * `requesterCwd`, and a `principal` with string `sessionId`/`agentName`. Any
+ * malformed shape → `undefined`, so the serving node floors to `ask` (Step 3)
+ * rather than resolving against corrupt facts.
+ */
+function asForwardedAccessIntent(
+  value: unknown,
+): ForwardedAccessIntent | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const candidate = value as {
+    surface?: unknown;
+    matchValues?: unknown;
+    boundaryValue?: unknown;
+    requesterCwd?: unknown;
+    principal?: unknown;
+  };
+  if (
+    typeof candidate.surface !== "string" ||
+    !Array.isArray(candidate.matchValues) ||
+    !candidate.matchValues.every((entry) => typeof entry === "string") ||
+    !(
+      candidate.boundaryValue === null ||
+      typeof candidate.boundaryValue === "string"
+    ) ||
+    typeof candidate.requesterCwd !== "string" ||
+    typeof candidate.principal !== "object" ||
+    candidate.principal === null
+  ) {
+    return undefined;
+  }
+  const principal = candidate.principal as {
+    sessionId?: unknown;
+    agentName?: unknown;
+  };
+  if (
+    typeof principal.sessionId !== "string" ||
+    typeof principal.agentName !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    surface: candidate.surface,
+    matchValues: [...candidate.matchValues],
+    boundaryValue: candidate.boundaryValue,
+    requesterCwd: candidate.requesterCwd,
+    principal: {
+      sessionId: principal.sessionId,
+      agentName: principal.agentName,
+    },
+  };
+}
+
+function asForwardedPortablePath(
+  value: unknown,
+): ForwardedPortablePath | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<ForwardedPortablePath>;
+  return {
+    projectRelative: optionalString(candidate.projectRelative),
+    parentEquivalent: optionalString(candidate.parentEquivalent),
+  };
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
 export function formatUnknownErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -125,7 +204,7 @@ export function ensureDirectoryExists(
   description: string,
 ): boolean {
   try {
-    mkdirSync(path, { recursive: true });
+    mkdirSync(path, { recursive: true, mode: OWNER_ONLY_DIRECTORY_MODE });
     return true;
   } catch (error) {
     logPermissionForwardingError(
@@ -305,7 +384,12 @@ export function writeJsonFileAtomic(
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
 
   try {
-    writeFileSync(tempPath, JSON.stringify(value), "utf-8");
+    // `rename` preserves the temp file's mode, so setting it here is enough —
+    // a response overwriting an existing file also comes through a fresh temp.
+    writeFileSync(tempPath, JSON.stringify(value), {
+      encoding: "utf-8",
+      mode: OWNER_ONLY_FILE_MODE,
+    });
     renameSync(tempPath, filePath);
   } catch (error) {
     safeDeleteFile(logger, tempPath, "temporary permission-forwarding");
@@ -350,6 +434,8 @@ export function readForwardedPermissionRequest(
       surface: asNullableDisplayString(parsed.surface),
       value: asNullableDisplayString(parsed.value),
       sessionApproval: asForwardedSessionApproval(parsed.sessionApproval),
+      accessIntent: asForwardedAccessIntent(parsed.accessIntent),
+      portablePath: asForwardedPortablePath(parsed.portablePath),
     };
   } catch (error) {
     logPermissionForwardingWarning(

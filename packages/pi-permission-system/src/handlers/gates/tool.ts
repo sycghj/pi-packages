@@ -11,7 +11,11 @@ import { SessionApproval } from "#src/session-approval";
 import type { ToolPreviewFormatter } from "#src/tool-preview-formatter";
 import type { PermissionCheckResult } from "#src/types";
 import type { GateDescriptor } from "./descriptor";
-import { deriveDecisionValue } from "./helpers";
+import {
+  accessFactsFromPath,
+  accessFactsFromValue,
+  deriveDecisionValue,
+} from "./helpers";
 import type { ToolCallContext } from "./types";
 
 /**
@@ -75,6 +79,18 @@ export function describeToolGate(
     formatter,
   );
 
+  const decisionValue = deriveDecisionValue(
+    gateSurface,
+    check,
+    getPathBearingToolPath(tcc.toolName, tcc.input) ?? undefined,
+  );
+
+  // A path-bearing tool carries the AccessPath's alias set; every other surface
+  // (bash command, MCP target, plain tool) carries its already-portable value.
+  const accessIntent = accessPath
+    ? accessFactsFromPath(gateSurface, accessPath)
+    : accessFactsFromValue(gateSurface, decisionValue);
+
   return {
     surface: gateSurface,
     input: tcc.input,
@@ -95,6 +111,7 @@ export function describeToolGate(
       toolCallId: tcc.toolCallId,
       toolName: tcc.toolName,
       sessionLabel: suggestion.label,
+      accessIntent,
       ...permissionLogContext,
     },
     logContext: {
@@ -106,11 +123,33 @@ export function describeToolGate(
     },
     decision: {
       surface: gateSurface,
-      value: deriveDecisionValue(
-        gateSurface,
-        check,
-        getPathBearingToolPath(tcc.toolName, tcc.input) ?? undefined,
-      ),
+      value: decisionValue,
     },
+    autoMode: autoModeRouting(check),
   };
+}
+
+const HUMAN_AUTHORITY_PATTERNS: Record<string, string> = {
+  "<credential-network-egress>": "credential_network_egress_requires_human",
+  "<destructive-git-history>": "destructive_git_history_requires_human",
+  "<indirection-bash-wrapper>": "indirection_bash_wrapper_requires_human",
+  "<opaque-bash-wrapper>": "opaque_bash_wrapper_requires_human",
+  "<permission-config-write>": "permission_config_write_requires_human",
+  "<unparseable-bash-command>": "unparseable_bash_requires_human",
+};
+
+function humanAuthorityRouting(reason: string): GateDescriptor["autoMode"] {
+  return { classifierApprovable: false, reason };
+}
+
+function autoModeRouting(
+  check: PermissionCheckResult,
+): GateDescriptor["autoMode"] {
+  if (check.state !== "ask") return undefined;
+  if (check.commandContext) {
+    return humanAuthorityRouting(`bash_${check.commandContext}_requires_human`);
+  }
+  if (!check.matchedPattern) return undefined;
+  const reason = HUMAN_AUTHORITY_PATTERNS[check.matchedPattern];
+  return reason ? humanAuthorityRouting(reason) : undefined;
 }

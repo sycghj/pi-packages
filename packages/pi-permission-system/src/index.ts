@@ -1,7 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getPackageDir } from "@earendil-works/pi-coding-agent";
 import { warmBashParser } from "./access-intent/bash/parser";
-import { buildAccessIntentForSurface } from "./access-intent/input-normalizer";
+import {
+  buildAccessIntentForSurface,
+  buildResolvedIntentFromMatchValues,
+} from "./access-intent/input-normalizer";
+import { AuthorizerRegistry } from "./authority/authorizer-registry";
 import { AuthorizerSelection } from "./authority/authorizer-selection";
 import {
   ForwardedRequestServer,
@@ -13,6 +17,7 @@ import { PermissionPrompter } from "./authority/permission-prompter";
 import { SubagentDetection } from "./authority/subagent-detection";
 import { subscribeSubagentLifecycle } from "./authority/subagent-lifecycle-events";
 import { getSubagentSessionRegistry } from "./authority/subagent-registry";
+import { createAutoAskDecider } from "./auto-mode-composition";
 import { registerBuiltinToolInputFormatters } from "./builtin-tool-input-formatters";
 import { registerPermissionSystemCommand } from "./config-modal";
 import { getGlobalConfigPath } from "./config-paths";
@@ -30,6 +35,9 @@ import { GateRunner } from "./handlers/gates/runner";
 import { SkillInputGatePipeline } from "./handlers/gates/skill-input-gate-pipeline";
 import { ToolCallGatePipeline } from "./handlers/gates/tool-call-gate-pipeline";
 import { createFailClosedToolCall } from "./handlers/tool-call-boundary";
+import { InMemoryEvidenceRecorder } from "./learning/evidence-recorder";
+import { LearnedGrantEvaluator } from "./learning/learned-grant-evaluator";
+import { SessionLearningStore } from "./learning/session-learning-store";
 import { pathFlavorForPlatform } from "./path/path-flavor";
 import { PermissionManager } from "./permission-manager";
 import { PermissionResolver } from "./permission-resolver";
@@ -64,6 +72,10 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   const formatterRegistry = new ToolInputFormatterRegistry();
   registerBuiltinToolInputFormatters(formatterRegistry);
   const accessExtractorRegistry = new ToolAccessExtractorRegistry();
+  // One registry instance backs both the registerAuthorizer service surface and
+  // AuthorizerSelection's chain resolution, so a registration is visible to
+  // composition.
+  const authorizerRegistry = new AuthorizerRegistry();
 
   // Both `configStore` and `session` are forward-declared so the logger's
   // lazy thunks can close over them without a cast or null-init holder.
@@ -108,6 +120,15 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
     registry: subagentRegistry,
     logger,
     prompter,
+    // The published service is the narrow, session-scoped PermissionQuery a
+    // chain link is handed (it routes bash/path at gate parity against the live
+    // session cwd). A thunk because `permissionsService` is constructed below;
+    // it resolves at session_start (activate), well after assignment.
+    getPermissionQuery: () => permissionsService,
+    // Same registry instance the registerAuthorizer service surface writes to,
+    // resolved in config order at activation.
+    authorizerRegistry,
+    getAuthorizerChain: () => configStore.current().authorizerChain ?? [],
   });
 
   // Resolver composes the manager + session ruleset and owns the
@@ -116,20 +137,18 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   // service and gates below share this one instance.
   const resolver = new PermissionResolver(permissionManager, sessionRules);
 
-  // Serving a forwarded request is resolution: evaluate (surface, value)
-  // against the serving node's composed base ruleset (agentName undefined —
-  // the child already applied its own per-agent overrides before forwarding).
-  // The session.getPathNormalizer() read is deferred behind the closure: inbox
-  // polling starts at session_start, after `session` is assigned — the same
-  // deferred-binding precedent as the logger notify sink below.
+  // Serving a forwarded request is resolution: resolve the child-fixed
+  // ForwardedAccessIntent (ADR 0008) directly against the serving node's
+  // composed ruleset, agent-scoped to the requester (§3) — the match values
+  // are used as fixed by the child, never re-derived through this session's
+  // PathNormalizer/cwd (#597).
   const servingPolicy: ServingPolicy = {
-    check: (surface, value) =>
+    resolve: (intent) =>
       resolver.resolve(
-        buildAccessIntentForSurface(
-          surface,
-          value ?? undefined,
-          session.getPathNormalizer(),
-          undefined,
+        buildResolvedIntentFromMatchValues(
+          intent.surface,
+          intent.matchValues,
+          intent.principal.agentName,
         ),
       ),
   };
@@ -159,7 +178,9 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   // refresh() must run after `session` is assigned: a debug-write IO failure
   // triggers the logger's notify sink — `session.notify(m)` — which no-ops
   // on the null context but requires `session` to be bound.
-  configStore.refresh();
+  // No ctx/trust decision exists at factory init, so withhold the project
+  // scope (fail closed); session_start reloads with the real trust decision.
+  configStore.refresh(undefined, false);
 
   const configPath = getGlobalConfigPath(agentDir);
   registerPermissionSystemCommand(pi, {
@@ -176,6 +197,7 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
     session,
     formatterRegistry,
     accessExtractorRegistry,
+    authorizerRegistry,
   );
 
   // Subscribe to @gotgenes/pi-subagents' child lifecycle events so child
@@ -221,11 +243,32 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   );
 
   const reporter = new GateDecisionReporter(logger, pi.events);
+  const autoAskDecider = createAutoAskDecider(
+    configStore,
+    session,
+    undefined,
+    (event, details) => {
+      logger.debug(event, details);
+      logger.review(event, details);
+    },
+  );
+  const learningEnabled = configStore.current().learning.enabled;
+  const learnedEvaluator = learningEnabled
+    ? new LearnedGrantEvaluator(
+        new SessionLearningStore({ now: () => Date.now() }),
+      )
+    : undefined;
+  const evidenceRecorder = learningEnabled
+    ? new InMemoryEvidenceRecorder()
+    : undefined;
   const gateRunner = new GateRunner(
     resolver,
     sessionRules,
     authorizerSelection,
     reporter,
+    autoAskDecider,
+    learnedEvaluator,
+    evidenceRecorder,
   );
   const toolCallGatePipeline = new ToolCallGatePipeline(
     resolver,
@@ -245,8 +288,8 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (event, ctx) =>
     lifecycle.handleSessionStart(event, ctx),
   );
-  pi.on("resources_discover", (event) =>
-    lifecycle.handleResourcesDiscover(event),
+  pi.on("resources_discover", (event, ctx) =>
+    lifecycle.handleResourcesDiscover(event, ctx),
   );
   pi.on("session_shutdown", () => lifecycle.handleSessionShutdown());
   pi.on("before_agent_start", (event, ctx) => agentPrep.handle(event, ctx));

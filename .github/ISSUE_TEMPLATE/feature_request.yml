@@ -11,6 +11,7 @@ body:
       options:
         - pi-autoformat
         - pi-github-tools
+        - pi-permission-model-judge
         - pi-permission-system
         - pi-subagents
     validations:

@@ -2,7 +2,7 @@
  * types.ts — Type definitions for the subagent system.
  */
 
-import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent, SessionContext as SdkSessionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelRegistry } from "#src/session/model-resolver";
 
@@ -85,8 +85,8 @@ export interface AgentInvocation {
  */
 export interface SessionContext {
   readonly cwd: string;
-  readonly model: unknown;
-  readonly modelRegistry: ModelRegistry | undefined;
+  readonly model: Model<any> | undefined;
+  readonly modelRegistry: ModelRegistry;
   getSystemPrompt(): string;
   readonly sessionManager: {
     getSessionFile(): string | undefined;

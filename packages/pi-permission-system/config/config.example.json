@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/gotgenes/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
+  "$schema": "https://raw.githubusercontent.com/sycghj/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
 
   "debugLog": false,
   "permissionReviewLog": true,
@@ -10,6 +10,8 @@
   "toolTextSummaryMaxLength": 120,
 
   "piInfrastructureReadPaths": [],
+
+  "authorizerChain": [],
 
   "shellTools": {
     "exec_command": { "commandArgument": "cmd", "workdirArgument": "workdir" }

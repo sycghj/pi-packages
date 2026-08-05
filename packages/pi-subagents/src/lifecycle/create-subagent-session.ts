@@ -22,6 +22,7 @@ import type { ChildLifecyclePublisher } from "#src/lifecycle/child-lifecycle";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import { SubagentSession } from "#src/lifecycle/subagent-session";
 import type { EnvInfo } from "#src/session/env";
+import type { ModelRegistry } from "#src/session/model-resolver";
 import { type AssemblerIO, assembleSessionConfig } from "#src/session/session-config";
 import type { ParentSessionInfo, ShellExec, SubagentType, ThinkingLevel } from "#src/types";
 
@@ -72,8 +73,8 @@ export interface CreateSessionOptions {
   agentDir: string;
   sessionManager: SessionManagerLike;
   settingsManager: SettingsManager;
-  modelRegistry: unknown;
-  model?: unknown;
+  modelRegistry: ModelRegistry;
+  model?: Model<any>;
   tools: string[];
   resourceLoader: ResourceLoaderLike;
   thinkingLevel?: ThinkingLevel;

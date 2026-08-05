@@ -20,6 +20,7 @@ Rules below are named by their markdownlint `MDxxx` IDs because `rumdl` implemen
 - Use one sentence per line (unbroken) for better diffs.
   Each sentence occupies exactly one line; never wrap a sentence across lines or place two sentences on the same line.
   This applies to all prose, including list-item continuations.
+- `rumdl`'s `MD057` can report an existing relative link as missing when its sentence runs long; split the sentence per the rule above rather than hunting the path (Refs #635).
 - Author and append markdown with the `Write`/`Edit` tools, not shell heredocs (`cat <<EOF`) — heredocs don't interpolate `\uXXXX` escapes and make one-sentence-per-line slips easy, both of which trip markdownlint.
 
 ### Code fences
@@ -31,6 +32,11 @@ Rules below are named by their markdownlint `MDxxx` IDs because `rumdl` implemen
 
 - Use sequential numbering (`1.` `2.` `3.`) in ordered lists, restarting at `1.` under each new heading — markdownlint's MD029 rejects continued numbering across section boundaries.
 - Do not use bold text (`**...**`) as a substitute for headings — use proper heading syntax; markdownlint's MD036 rejects emphasis used as headings.
+
+### Inserting a new section
+
+Before inserting a new `##`/`###` section into an existing document, read the parent section end to end.
+An insertion point that reads correctly at the seam can reparent what follows it — a shared example block, a trailing summary sentence — under the new heading.
 
 ### Tables and blockquotes
 

@@ -19,18 +19,14 @@ import type { ForwardingController } from "#src/authority/forwarding-manager";
 import type { SessionConfigStore } from "#src/config-store";
 import { DEFAULT_EXTENSION_CONFIG } from "#src/extension-config";
 import type { ExtensionPaths } from "#src/extension-paths";
-import { type PathFlavor, pathFlavorForPlatform } from "#src/path/path-flavor";
+import { type PathFlavor, posixPathFlavor } from "#src/path/path-flavor";
 import type { ScopedPermissionManager } from "#src/permission-manager";
 import { PermissionResolver } from "#src/permission-resolver";
 import { PermissionSession } from "#src/permission-session";
 import type { Ruleset } from "#src/rule";
 import type { SessionLogger } from "#src/session-logger";
 import { SessionRules } from "#src/session-rules";
-import type {
-  PathRuleTokenMatcher,
-  PermissionCheckResult,
-  PermissionState,
-} from "#src/types";
+import type { PermissionCheckResult, PermissionState } from "#src/types";
 
 // ── Per-collaborator fake factories ────────────────────────────────────────
 
@@ -65,7 +61,11 @@ export function makeConfigStore(
       vi
         .fn<() => typeof DEFAULT_EXTENSION_CONFIG>()
         .mockReturnValue({ ...DEFAULT_EXTENSION_CONFIG }),
-    refresh: overrides.refresh ?? vi.fn<(ctx?: ExtensionContext) => void>(),
+    refresh:
+      overrides.refresh ??
+      vi.fn<
+        (ctx: ExtensionContext | undefined, projectTrusted: boolean) => void
+      >(),
     logResolvedPaths: overrides.logResolvedPaths ?? vi.fn<() => void>(),
   };
 }
@@ -110,9 +110,6 @@ export function makeFakePermissionManager() {
       .fn<(toolName: string, agentName?: string) => PermissionState>()
       .mockReturnValue("allow"),
     getConfigIssues: vi.fn((): string[] => []),
-    getPromotablePathTokenMatcher: vi
-      .fn<(agentName?: string) => PathRuleTokenMatcher>()
-      .mockReturnValue(() => false),
   };
 }
 
@@ -156,7 +153,7 @@ export function makeRealSession(overrides?: {
   const configStore = overrides?.configStore ?? makeConfigStore();
   const authorizerSelection =
     overrides?.authorizerSelection ?? makeAuthorizerSelection();
-  const flavor = overrides?.flavor ?? pathFlavorForPlatform(process.platform);
+  const flavor = overrides?.flavor ?? posixPathFlavor;
   const session = new PermissionSession(
     paths,
     forwarding,

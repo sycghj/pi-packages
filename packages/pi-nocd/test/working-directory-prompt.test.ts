@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  appendWorkingDirectoryPrompt,
   buildWorkingDirectoryPrompt,
+  ensureWorkingDirectoryPrompt,
   WORKING_DIRECTORY_HEADING,
 } from "#src/working-directory-prompt.js";
 
@@ -29,9 +29,9 @@ describe("buildWorkingDirectoryPrompt", () => {
   });
 });
 
-describe("appendWorkingDirectoryPrompt", () => {
+describe("ensureWorkingDirectoryPrompt", () => {
   it("appends the block to an existing system prompt", () => {
-    const result = appendWorkingDirectoryPrompt(
+    const result = ensureWorkingDirectoryPrompt(
       "You are a helpful assistant.",
       "/srv/project",
     );
@@ -41,13 +41,55 @@ describe("appendWorkingDirectoryPrompt", () => {
   });
 
   it("separates the base prompt from the block with a blank line", () => {
-    const result = appendWorkingDirectoryPrompt("Base.", "/srv/project");
+    const result = ensureWorkingDirectoryPrompt("Base.", "/srv/project");
     expect(result).toContain(`Base.\n\n${WORKING_DIRECTORY_HEADING}`);
   });
 
   it("is idempotent when the block is already present", () => {
-    const once = appendWorkingDirectoryPrompt("Base.", "/srv/project");
-    const twice = appendWorkingDirectoryPrompt(once, "/srv/project");
+    const once = ensureWorkingDirectoryPrompt("Base.", "/srv/project");
+    const twice = ensureWorkingDirectoryPrompt(once, "/srv/project");
     expect(twice).toBe(once);
+  });
+
+  // Issue #640: a subagent inherits its parent's system prompt verbatim, so a
+  // child sees a block naming the parent's directory. Deferring to it left the
+  // child with an instruction pointing at the wrong path.
+  describe("inherited block naming another directory", () => {
+    it("rewrites the block to name the current working directory", () => {
+      const inherited = ensureWorkingDirectoryPrompt("Base.", "/repo");
+
+      const result = ensureWorkingDirectoryPrompt(inherited, "/repo/worktree");
+
+      expect(result).toBe(
+        `Base.\n\n${buildWorkingDirectoryPrompt("/repo/worktree")}`,
+      );
+    });
+
+    it("rewrites in place rather than appending a second block", () => {
+      const inherited = `${ensureWorkingDirectoryPrompt("Base.", "/repo")}\n\nTrailing content.`;
+
+      const result = ensureWorkingDirectoryPrompt(inherited, "/repo/worktree");
+
+      expect(result).toBe(
+        `Base.\n\n${buildWorkingDirectoryPrompt("/repo/worktree")}\n\nTrailing content.`,
+      );
+    });
+
+    it("is stable under repeat application", () => {
+      const inherited = ensureWorkingDirectoryPrompt("Base.", "/repo");
+
+      const once = ensureWorkingDirectoryPrompt(inherited, "/repo/worktree");
+      const twice = ensureWorkingDirectoryPrompt(once, "/repo/worktree");
+
+      expect(twice).toBe(once);
+    });
+
+    it("leaves a foreign block under the same heading untouched", () => {
+      const foreign = `Base.\n\n${WORKING_DIRECTORY_HEADING}\n\nSomeone else's rules about directories.`;
+
+      const result = ensureWorkingDirectoryPrompt(foreign, "/srv/project");
+
+      expect(result).toBe(foreign);
+    });
   });
 });

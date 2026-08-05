@@ -27,7 +27,8 @@ fi
 for sym in getPermissionsService publishPermissionsService unpublishPermissionsService \
   PermissionsService PermissionCheckResult PermissionState ToolInputFormatter \
   PERMISSIONS_UI_PROMPT_CHANNEL PERMISSIONS_READY_CHANNEL PERMISSIONS_DECISION_CHANNEL \
-  PermissionUiPromptEvent; do
+  PermissionUiPromptEvent registerAuthorizer PermissionQuery Authorizer \
+  AuthorizerVerdict PromptPermissionDetails; do
   grep -q "$sym" "$DTS" || { echo "FAIL: '$sym' missing from dist/public.d.ts" >&2; exit 1; }
 done
 echo "OK: dist/public.d.ts is self-contained and exports the public surface"
@@ -63,7 +64,7 @@ import {
   PERMISSIONS_UI_PROMPT_CHANNEL,
   type PermissionCheckResult,
   type PermissionUiPromptEvent,
-} from "@gotgenes/pi-permission-system";
+} from "@sycghj/pi-permission-system";
 
 void getPermissionsService;
 void PERMISSIONS_UI_PROMPT_CHANNEL;
@@ -87,4 +88,4 @@ pnpm --dir "$CONSUMER" --ignore-workspace --ignore-scripts add \
 # starts from the probe file, so the tarball and peers resolve from the consumer's
 # own node_modules via the package's exports "types" condition.
 pnpm --dir "$PKG_DIR" exec tsc -p "$CONSUMER/tsconfig.json"
-echo "OK: external consumer type-checks against the packaged @gotgenes/pi-permission-system"
+echo "OK: external consumer type-checks against the packaged @sycghj/pi-permission-system"

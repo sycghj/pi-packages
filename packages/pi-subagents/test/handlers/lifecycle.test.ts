@@ -101,11 +101,14 @@ describe("SessionLifecycleHandler", () => {
 
       await handler.handleSessionShutdown();
 
+      // Notifications are torn down before the aborts: a terminal transition
+      // fires its nudge synchronously when no parent run is active, and Pi
+      // cannot recall a message already handed to it.
       expect(callOrder).toEqual([
         "unpublishService",
         "clearSessionContext",
-        "abortAll",
         "disposeNotifications",
+        "abortAll",
         "dispose",
       ]);
     });

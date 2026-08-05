@@ -15,7 +15,7 @@ import type { GateDescriptor } from "#src/handlers/gates/descriptor";
 import { isGateDescriptor } from "#src/handlers/gates/descriptor";
 import { describePathGate } from "#src/handlers/gates/path";
 import type { ToolCallContext } from "#src/handlers/gates/types";
-import { pathFlavorForPlatform, posixPathFlavor } from "#src/path/path-flavor";
+import { posixPathFlavor } from "#src/path/path-flavor";
 import { PathNormalizer } from "#src/path-normalizer";
 
 import {
@@ -39,10 +39,7 @@ function makeTcc(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
 
 // The gate reads the path normalizer (platform + cwd baked in) from the
 // session; here it is bound to the makeTcc default cwd.
-const normalizer = new PathNormalizer(
-  pathFlavorForPlatform(process.platform),
-  "/test/project",
-);
+const normalizer = new PathNormalizer(posixPathFlavor, "/test/project");
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
@@ -173,6 +170,26 @@ describe("describePathGate", () => {
       toolName: "read",
       pathValue: ".env",
       agentName: undefined,
+    });
+  });
+
+  it("carries the child-fixed access facts on promptDetails (path surface)", () => {
+    const resolver = makeResolver(
+      makeCheckResult({ state: "ask", matchedPattern: "*.env" }),
+    );
+    const result = describePathGate(
+      makeTcc(),
+      resolver,
+      normalizer,
+    ) as GateDescriptor;
+    const accessPath = AccessPath.forPath(".env", {
+      cwd: "/test/project",
+      flavor: posixPathFlavor,
+    });
+    expect(result.promptDetails.accessIntent).toEqual({
+      surface: "path",
+      matchValues: accessPath.matchValues(),
+      boundaryValue: accessPath.boundaryValue(),
     });
   });
 

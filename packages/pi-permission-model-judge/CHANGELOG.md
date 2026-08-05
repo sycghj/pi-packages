@@ -1,0 +1,76 @@
+# Changelog
+
+## [1.1.2](https://github.com/gotgenes/pi-packages/compare/pi-permission-model-judge-v1.1.1...pi-permission-model-judge-v1.1.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **pi-permission-model-judge:** review typo paths embedded in bash commands ([#630](https://github.com/gotgenes/pi-packages/issues/630)) ([782c83d](https://github.com/gotgenes/pi-packages/commit/782c83d36d5d279c4932be315b9e78aae43ccb26))
+
+
+### Documentation
+
+* **pi-permission-model-judge:** note bash-command paths are reviewed ([58a82e8](https://github.com/gotgenes/pi-packages/commit/58a82e8ca7a0df5552b767099004afc83e53be55))
+
+## [1.1.1](https://github.com/gotgenes/pi-packages/compare/pi-permission-model-judge-v1.1.0...pi-permission-model-judge-v1.1.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **pi-permission-model-judge:** force a structured verdict tool call in the model review ([5a89bba](https://github.com/gotgenes/pi-packages/commit/5a89bba94b6493790a664e87cad98514253927fe)), closes [#628](https://github.com/gotgenes/pi-packages/issues/628)
+
+
+### Documentation
+
+* **pi-permission-model-judge:** describe the forced verdict tool call ([1a2b940](https://github.com/gotgenes/pi-packages/commit/1a2b9404ad06b083f96b455df0a66e934b3f5eab))
+
+## [1.1.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-model-judge-v1.0.2...pi-permission-model-judge-v1.1.0) (2026-07-21)
+
+
+### Features
+
+* **pi-permission-model-judge:** distinguish model-call defer reasons in reviewPath ([9098f46](https://github.com/gotgenes/pi-packages/commit/9098f465d64dfee3994132bd87a71ad40152b259))
+* **pi-permission-model-judge:** record the decision trail to the permission review log ([e3964ae](https://github.com/gotgenes/pi-packages/commit/e3964ae6ca443d043db4e735ad69df90bac11c0d))
+* **pi-permission-model-judge:** return the matched typo pattern ([4db29fb](https://github.com/gotgenes/pi-packages/commit/4db29fbf098c8d3c853539b408316ee2a8fffe54))
+
+
+### Documentation
+
+* **pi-permission-model-judge:** document the decision trail ([335a7b5](https://github.com/gotgenes/pi-packages/commit/335a7b5b0f40650760d8597f511f32dc2116bf81))
+
+## [1.0.2](https://github.com/gotgenes/pi-packages/compare/pi-permission-model-judge-v1.0.1...pi-permission-model-judge-v1.0.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* **pi-permission-model-judge:** forward resolved auth into the review model call ([9836020](https://github.com/gotgenes/pi-packages/commit/98360207d19a91edcf8e166b59dd1a9262349277)), closes [#625](https://github.com/gotgenes/pi-packages/issues/625)
+* **pi-permission-model-judge:** resolve model auth before the review call ([4c90603](https://github.com/gotgenes/pi-packages/commit/4c906031144e18c7f6b60eac5f8607e271f090f2)), closes [#625](https://github.com/gotgenes/pi-packages/issues/625)
+
+
+### Documentation
+
+* **pi-permission-model-judge:** feature the corrected dropped-prefix typo pattern ([13553d5](https://github.com/gotgenes/pi-packages/commit/13553d5c4ba8ba50a90688bd26e597a842f5f509)), closes [#625](https://github.com/gotgenes/pi-packages/issues/625)
+
+## [1.0.1](https://github.com/gotgenes/pi-packages/compare/pi-permission-model-judge-v1.0.0...pi-permission-model-judge-v1.0.1) (2026-07-20)
+
+
+### Documentation
+
+* **pi-permission-model-judge:** feature the doubled-package typo pattern ([abcfa23](https://github.com/gotgenes/pi-packages/commit/abcfa23eac678b42b2e031b0bb1092db4b601c55))
+
+## 1.0.0 (2026-07-20)
+
+
+### Features
+
+* **pi-permission-model-judge:** deny-first external_directory reviewer ([27d8c31](https://github.com/gotgenes/pi-packages/commit/27d8c317f4f11a233482fed004e35ad35654fe79))
+* **pi-permission-model-judge:** model confirmation of typo paths ([2439faa](https://github.com/gotgenes/pi-packages/commit/2439faacd3950b10bb01940aa0c82dd8999138bb))
+* **pi-permission-model-judge:** register the model-judge link on permissions:ready ([4ce1ead](https://github.com/gotgenes/pi-packages/commit/4ce1ead9fe7c47ce066cf7a7e48d86729cd53eee))
+* **pi-permission-model-judge:** ship generated config JSON schema and example ([0158258](https://github.com/gotgenes/pi-packages/commit/0158258e39b60eda0b99ed8dfa3f255a5368eaf4))
+* **pi-permission-model-judge:** typo-pattern compilation and matching ([a4e6639](https://github.com/gotgenes/pi-packages/commit/a4e6639f2fee9db323bfc0ddd6183cc0b5685e2b))
+* **pi-permission-model-judge:** zod config schema and layered loader ([d9cbc7a](https://github.com/gotgenes/pi-packages/commit/d9cbc7a952db59a4fa89b375648c98a0536803b8))
+
+
+### Documentation
+
+* **pi-permission-model-judge:** package README and configuration reference ([25e4ff9](https://github.com/gotgenes/pi-packages/commit/25e4ff949ffc85c5246da44528efbe2acbd5744c))

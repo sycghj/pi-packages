@@ -130,6 +130,11 @@ export class AgentWidget implements SubagentManagerObserver {
     this.update();
   }
 
+  /** A subagent finished a resume — render so the refreshed result is shown. */
+  onSubagentResumed(_record: Subagent) {
+    this.update();
+  }
+
   /** A subagent's session compacted — render to refresh the compaction count. */
   onSubagentCompacted(_record: Subagent, _info: CompactionInfo) {
     this.update();

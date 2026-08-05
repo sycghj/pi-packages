@@ -11,8 +11,8 @@
  * because the components require a `TUI`, `cwd`, and markdown theme.
  *
  * The overlay is strictly read-only — steering stays in the `steer_subagent` tool
- * and the widget. It consumes a `TranscriptSource`, so the evicted-agent-source
- * follow-up swaps the source without touching the renderer or the overlay.
+ * and the widget. It consumes a `TranscriptSource`, so a released agent's disk
+ * snapshot (`fileSnapshotSource`) swaps in without touching the renderer or the overlay.
  */
 
 import {
@@ -38,9 +38,9 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "#src/config/agent-types";
-import type { EvictedSubagent } from "#src/lifecycle/subagent-manager";
 import type { SessionMessage } from "#src/types";
 import { describeActivity, type Theme } from "#src/ui/display";
+import { GLYPHS } from "#src/ui/glyphs";
 import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSubagent, type TranscriptSource } from "#src/ui/session-navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,8 +69,6 @@ export interface SessionNavigatorUI {
 export interface SessionNavigatorParams {
   ui: SessionNavigatorUI;
   agents: readonly NavigableSubagent[];
-  /** Descriptors of agents evicted by the cleanup sweep, sourced from disk when picked. */
-  evicted: readonly EvictedSubagent[];
   registry: AgentConfigLookup;
   /** Working directory for tool-call rendering (relative path display). */
   cwd: string;
@@ -96,8 +94,8 @@ export interface TranscriptOverlayOptions {
  * manager, so it stays a reactive consumer with no inbound call into the core.
  */
 export class SessionNavigatorHandler {
-  async handle({ ui, agents, evicted, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
-    const entries = listNavigableAgents(agents, evicted, registry);
+  async handle({ ui, agents, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
+    const entries = listNavigableAgents(agents, registry);
     if (entries.length === 0) {
       ui.notify("No subagent sessions to view.", "info");
       return;
@@ -267,7 +265,10 @@ export class TranscriptOverlay implements Component {
     const lines = this.content.render(innerW);
     const streaming = this.source.streaming();
     if (streaming) {
-      lines.push("", `◍ ${describeActivity(streaming.activeTools, streaming.responseText)}`);
+      lines.push(
+        "",
+        `${GLYPHS.streaming} ${describeActivity(streaming.activeTools, streaming.responseText)}`,
+      );
     }
     return lines.map((l) => truncateToWidth(l, innerW));
   }

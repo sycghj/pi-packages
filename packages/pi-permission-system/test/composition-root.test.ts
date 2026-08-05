@@ -17,6 +17,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,11 +87,46 @@ function writeGlobalConfig(config: Record<string, unknown>): void {
   );
 }
 
-/** Build a minimal subagent `ctx` (no UI) for driving tool-call gates. */
-function makeChildCtx(cwd: string, sessionId: string): unknown {
+/** Write a project config file under `<cwd>/.pi/extensions/pi-permission-system`. */
+function writeProjectConfig(
+  cwd: string,
+  config: Record<string, unknown>,
+): void {
+  const dir = join(cwd, ".pi", "extensions", "pi-permission-system");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "config.json"),
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+/** A `ui.select` implementation for a test ctx. */
+type CtxSelect = (
+  title: string,
+  options: string[],
+) => Promise<string | undefined>;
+
+/**
+ * Build a test `ctx` with the scaffolding every composition-root ctx shares —
+ * `cwd`, a trusted project, a minimal `sessionManager`, and a `ui` whose
+ * `notify`/`setStatus`/`input` are inert. Callers vary only `hasUI` and the
+ * `select` behavior that drives (or declines) a prompt.
+ */
+function makeBaseCtx(
+  cwd: string,
+  sessionId: string,
+  options: {
+    hasUI?: boolean;
+    select?: CtxSelect;
+    isProjectTrusted?: boolean;
+  } = {},
+): unknown {
+  const trusted = options.isProjectTrusted ?? true;
   return {
     cwd,
-    hasUI: false,
+    hasUI: options.hasUI ?? true,
+    isProjectTrusted: (): boolean => trusted,
     sessionManager: {
       getEntries: (): unknown[] => [],
       getSessionId: (): string => sessionId,
@@ -99,10 +135,16 @@ function makeChildCtx(cwd: string, sessionId: string): unknown {
     ui: {
       notify: (): void => {},
       setStatus: (): void => {},
-      select: async (): Promise<string | undefined> => undefined,
+      select:
+        options.select ?? (async (): Promise<string | undefined> => undefined),
       input: async (): Promise<string | undefined> => undefined,
     },
   };
+}
+
+/** Build a minimal subagent `ctx` (no UI) for driving tool-call gates. */
+function makeChildCtx(cwd: string, sessionId: string): unknown {
+  return makeBaseCtx(cwd, sessionId, { hasUI: false });
 }
 
 /**
@@ -111,24 +153,12 @@ function makeChildCtx(cwd: string, sessionId: string): unknown {
  * preview) is the first line of the select title.
  */
 function makeUiCtx(cwd: string, capturedTitles: string[]): { ctx: unknown } {
-  const ctx = {
-    cwd,
-    hasUI: true,
-    sessionManager: {
-      getEntries: (): unknown[] => [],
-      getSessionId: (): string => "ui-session",
-      getSessionDir: (): string => cwd,
+  const ctx = makeBaseCtx(cwd, "ui-session", {
+    select: async (title: string): Promise<string | undefined> => {
+      capturedTitles.push(title);
+      return "Yes";
     },
-    ui: {
-      notify: (): void => {},
-      setStatus: (): void => {},
-      select: async (title: string): Promise<string | undefined> => {
-        capturedTitles.push(title);
-        return "Yes";
-      },
-      input: async (): Promise<string | undefined> => undefined,
-    },
-  };
+  });
   return { ctx };
 }
 
@@ -369,6 +399,76 @@ describe("service and gate share one access extractor registry", () => {
   });
 });
 
+describe("service and chain share one authorizer registry", () => {
+  // A link registered through the published service must be consulted by the
+  // live ask gate when the operator names it in authorizerChain — proving both
+  // the registerAuthorizer surface and AuthorizerSelection reference the same
+  // AuthorizerRegistry instance the factory created once (#599).
+  it("consults a service-registered, config-named link at the ask gate", async () => {
+    writeGlobalConfig({
+      permission: { "*": "ask" },
+      authorizerChain: ["typo-judge"],
+    });
+
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-auth-cwd-"));
+    const pi = makeFakePi({ toolNames: ["demo"] });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+
+    const capturedTitles: string[] = [];
+    const { ctx } = makeUiCtx(cwd, capturedTitles);
+    await fireSessionStart(pi, ctx);
+
+    // Registered after session_start via the published service; link resolution
+    // is per-ask (ADR 0007 §4), so it is honored on the first ask.
+    getPermissionsService()!.registerAuthorizer("typo-judge", () =>
+      Promise.resolve({ kind: "deny", reason: "typo path" }),
+    );
+
+    const result = (await pi.fire(
+      "tool_call",
+      { toolName: "demo", toolCallId: "d-1", input: {} },
+      ctx,
+    )) as { block?: true };
+
+    // The link denied before the (approving) UI terminal was reached — so the
+    // gate escalated through the same registry the service wrote to, and the
+    // config named it (opt-in activation).
+    expect(result.block).toBe(true);
+    expect(capturedTitles).toEqual([]);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("ignores a registered link the operator did not name (opt-in)", async () => {
+    writeGlobalConfig({ permission: { "*": "ask" } }); // authorizerChain omitted
+
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-auth-optin-"));
+    const pi = makeFakePi({ toolNames: ["demo"] });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+
+    const capturedTitles: string[] = [];
+    const { ctx } = makeUiCtx(cwd, capturedTitles);
+    await fireSessionStart(pi, ctx);
+
+    getPermissionsService()!.registerAuthorizer("typo-judge", () =>
+      Promise.resolve({ kind: "deny", reason: "typo path" }),
+    );
+
+    const result = (await pi.fire(
+      "tool_call",
+      { toolName: "demo", toolCallId: "d-2", input: {} },
+      ctx,
+    )) as { block?: true };
+
+    // Registration alone grants no authority: the un-named link is dormant, so
+    // the ask reached the approving UI terminal.
+    expect(result.block).toBeUndefined();
+    expect(capturedTitles).toHaveLength(1);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
 describe("ready emitted after service publication", () => {
   // Ordering contracts exist only at the composition root: a consumer reacting
   // to permissions:ready must be able to resolve the service immediately. The
@@ -409,26 +509,14 @@ describe("single source of truth for session state", () => {
     piPermissionSystemExtension(pi as unknown as ExtensionAPI);
 
     // UI ctx that approves the gate prompt for this session (options[1]).
-    const ctx = {
-      cwd,
-      hasUI: true,
-      sessionManager: {
-        getEntries: (): unknown[] => [],
-        getSessionId: (): string => "sot-session",
-        getSessionDir: (): string => cwd,
-      },
-      ui: {
-        notify: (): void => {},
-        setStatus: (): void => {},
-        // Return the second option label-agnostically — always the
-        // "for this session" choice regardless of the exact label text.
-        select: async (
-          _title: string,
-          options: string[],
-        ): Promise<string | undefined> => options[1],
-        input: async (): Promise<string | undefined> => undefined,
-      },
-    };
+    // Return the second option label-agnostically — always the "for this
+    // session" choice regardless of the exact label text.
+    const ctx = makeBaseCtx(cwd, "sot-session", {
+      select: async (
+        _title: string,
+        options: string[],
+      ): Promise<string | undefined> => options[1],
+    });
 
     await fireSessionStart(pi, ctx);
 
@@ -475,14 +563,55 @@ describe("service path queries evaluate the supplied path (#503)", () => {
   });
 });
 
-describe("bash bare-filename path gating (#509)", () => {
-  // Before #509 a bash bare-filename argument (`cat id_rsa`) bypassed the
-  // `path` surface entirely: the broad classifier only accepted tokens
-  // starting with `.`, containing `/`, containing `..`, or a Windows
-  // drive-letter absolute path. The same file accessed via a prefixed path
-  // (`cat ./id_rsa`) or the `read` tool was already gated. Rule-driven
-  // promotion closes the gap for a bare token matching a specific, non-`*`
-  // `path` deny/ask rule — the literal repro from the issue.
+describe("project trust gates project-scoped config (#644)", () => {
+  it("does not let an untrusted project's `bash: allow` override global `bash: deny`", async () => {
+    writeGlobalConfig({ permission: { "*": "ask", bash: "deny" } });
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-untrusted-cwd-"));
+    writeProjectConfig(cwd, { permission: { bash: "allow" } });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    await fireSessionStart(
+      pi,
+      makeBaseCtx(cwd, "untrusted-session", { isProjectTrusted: false }),
+    );
+
+    // Global `deny` survives: the untrusted project scope was never loaded.
+    expect(
+      getPermissionsService()!.checkPermission("bash", "echo hi").state,
+    ).toBe("deny");
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("lets a trusted project's `bash: allow` override global `bash: deny`", async () => {
+    writeGlobalConfig({ permission: { "*": "ask", bash: "deny" } });
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-trusted-cwd-"));
+    writeProjectConfig(cwd, { permission: { bash: "allow" } });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    await fireSessionStart(
+      pi,
+      makeBaseCtx(cwd, "trusted-session", { isProjectTrusted: true }),
+    );
+
+    // The trusted project override applies (last-match-wins).
+    expect(
+      getPermissionsService()!.checkPermission("bash", "echo hi").state,
+    ).toBe("allow");
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe("bash bare-token path gating (#509, #645)", () => {
+  // A bash bare-filename argument (`cat id_rsa`) once bypassed the `path`
+  // surface entirely: the broad classifier accepted only tokens starting with
+  // `.`, containing `/` or `..`, or a Windows drive-letter absolute. #509
+  // closed that for a token whose *spelling* matched a specific `path` rule;
+  // #645 replaced spelling-matching with an existence probe, so candidacy comes
+  // from the filesystem and a symlink is matched by rules naming its target.
 
   async function fireBashToolCall(
     pi: ReturnType<typeof makeFakePi>,
@@ -496,8 +625,9 @@ describe("bash bare-filename path gating (#509)", () => {
     )) as { block?: true; reason?: string };
   }
 
-  it("denies a bare filename matching a specific path deny rule", async () => {
+  it("denies an existing bare filename matching a specific path deny rule", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-perm-bare-token-cwd-"));
+    writeFileSync(join(cwd, "id_rsa"), "key");
     writeGlobalConfig({
       permission: { "*": "allow", path: { id_rsa: "deny" } },
     });
@@ -513,8 +643,9 @@ describe("bash bare-filename path gating (#509)", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("denies a bare filename matching a wildcard path deny rule", async () => {
+  it("denies an existing bare filename matching a wildcard path deny rule", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-perm-bare-token-cwd-"));
+    writeFileSync(join(cwd, "key.pem"), "key");
     writeGlobalConfig({
       permission: { "*": "allow", path: { "*.pem": "deny" } },
     });
@@ -525,6 +656,28 @@ describe("bash bare-filename path gating (#509)", () => {
     await fireSessionStart(pi, ctx);
 
     const result = await fireBashToolCall(pi, ctx, "cat key.pem");
+    expect(result.block).toBe(true);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("denies a bare symlink whose target matches a path deny rule (#645)", async () => {
+    // The operator's case: the rule names the target, not the link. Matching a
+    // token's spelling could never catch this; canonicalization after the probe
+    // does.
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-bare-symlink-cwd-"));
+    writeFileSync(join(cwd, ".some.secret"), "s3cret");
+    symlinkSync(join(cwd, ".some.secret"), join(cwd, "a_sym"));
+    writeGlobalConfig({
+      permission: { "*": "allow", path: { "*.some.secret": "deny" } },
+    });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeChildCtx(cwd, "bare-symlink-session-deny");
+    await fireSessionStart(pi, ctx);
+
+    const result = await fireBashToolCall(pi, ctx, "cat a_sym");
     expect(result.block).toBe(true);
 
     rmSync(cwd, { recursive: true, force: true });
@@ -545,6 +698,106 @@ describe("bash bare-filename path gating (#509)", () => {
     expect(result.block).toBeUndefined();
 
     rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("leaves a bare token naming no file unaffected even under a path deny rule (#645)", async () => {
+    // The probe's precision: `id_rsa` matches the rule by spelling, but names
+    // nothing here, so it is not an operand and is not gated.
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-bare-absent-cwd-"));
+    writeGlobalConfig({
+      permission: { "*": "allow", path: { id_rsa: "deny" } },
+    });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeChildCtx(cwd, "bare-token-session-absent");
+    await fireSessionStart(pi, ctx);
+
+    const result = await fireBashToolCall(pi, ctx, "cat id_rsa");
+    expect(result.block).toBeUndefined();
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("leaves an existing bare file unrestricted when no explicit path rule matches (#58)", async () => {
+    // The universal-fallback guard is what keeps probe promotion from becoming
+    // a prompt firehose: a promoted token matching only the synthesized default
+    // is unrestricted, so a real file with no rule naming it stays allowed.
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-bare-norule-cwd-"));
+    writeFileSync(join(cwd, "README"), "docs");
+    writeGlobalConfig({
+      permission: { "*": "allow", path: { id_rsa: "deny" } },
+    });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeChildCtx(cwd, "bare-token-session-norule");
+    await fireSessionStart(pi, ctx);
+
+    const result = await fireBashToolCall(pi, ctx, "cat README");
+    expect(result.block).toBeUndefined();
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("denies a bare symlink escaping the working tree under external_directory deny (#645)", async () => {
+    // The issue's headline repro:
+    //   printf 'test' > /tmp/…-secret ; ln -s /tmp/…-secret outside-link
+    //   cat outside-link            (under a permissive `cat *` bash rule)
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-escape-cwd-"));
+    const outside = mkdtempSync(join(tmpdir(), "pi-perm-escape-target-"));
+    const secret = join(outside, "pi-permission-test-secret");
+    writeFileSync(secret, "test");
+    symlinkSync(secret, join(cwd, "outside-link"));
+    writeGlobalConfig({
+      permission: {
+        "*": "allow",
+        bash: { "cat *": "allow" },
+        external_directory: "deny",
+      },
+    });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeChildCtx(cwd, "bare-escape-session-deny");
+    await fireSessionStart(pi, ctx);
+
+    const result = await fireBashToolCall(pi, ctx, "cat outside-link");
+    expect(result.block).toBe(true);
+
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("denies a path embedded in a long option under external_directory deny (#645)", async () => {
+    // The issue's second repro: `grep --file=/tmp/…` under an allowing
+    // `grep *` bash rule. The flag token never reached the path surfaces.
+    const cwd = mkdtempSync(join(tmpdir(), "pi-perm-flagpath-cwd-"));
+    const outside = mkdtempSync(join(tmpdir(), "pi-perm-flagpath-target-"));
+    const patterns = join(outside, "pi-permission-patterns");
+    writeFileSync(patterns, "secret\n");
+    writeGlobalConfig({
+      permission: {
+        "*": "allow",
+        bash: { "grep *": "allow" },
+        external_directory: "deny",
+      },
+    });
+
+    const pi = makeFakePi({ events: createEventBus() });
+    piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeChildCtx(cwd, "flag-path-session-deny");
+    await fireSessionStart(pi, ctx);
+
+    const result = await fireBashToolCall(
+      pi,
+      ctx,
+      `grep --file=${patterns} target`,
+    );
+    expect(result.block).toBe(true);
+
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   });
 });
 
@@ -609,24 +862,12 @@ describe("session approvals do not leak across same-cwd session switches", () =>
 
   /** A UI ctx that approves the gate's "for this session" option (options[1]). */
   function makeSessionApprovingCtx(cwd: string, sessionId: string): unknown {
-    return {
-      cwd,
-      hasUI: true,
-      sessionManager: {
-        getEntries: (): unknown[] => [],
-        getSessionId: (): string => sessionId,
-        getSessionDir: (): string => cwd,
-      },
-      ui: {
-        notify: (): void => {},
-        setStatus: (): void => {},
-        select: async (
-          _title: string,
-          options: string[],
-        ): Promise<string | undefined> => options[1],
-        input: async (): Promise<string | undefined> => undefined,
-      },
-    };
+    return makeBaseCtx(cwd, sessionId, {
+      select: async (
+        _title: string,
+        options: string[],
+      ): Promise<string | undefined> => options[1],
+    });
   }
 
   it("starts the next same-cwd session with an empty session ruleset", async () => {
@@ -683,33 +924,21 @@ describe("forwarded grant-scope selection round-trip", () => {
     selectLog: string[][],
     scope: "whole" | "subagent",
   ): unknown {
-    return {
-      cwd,
-      hasUI: true,
-      sessionManager: {
-        getEntries: (): unknown[] => [],
-        getSessionId: (): string => sessionId,
-        getSessionDir: (): string => cwd,
+    return makeBaseCtx(cwd, sessionId, {
+      select: async (
+        _title: string,
+        options: string[],
+      ): Promise<string | undefined> => {
+        selectLog.push(options);
+        const wholeOption = options.find((o) =>
+          o.startsWith("The whole session"),
+        );
+        if (wholeOption) {
+          return scope === "whole" ? wholeOption : options[0];
+        }
+        return options[1];
       },
-      ui: {
-        notify: (): void => {},
-        setStatus: (): void => {},
-        select: async (
-          _title: string,
-          options: string[],
-        ): Promise<string | undefined> => {
-          selectLog.push(options);
-          const wholeOption = options.find((o) =>
-            o.startsWith("The whole session"),
-          );
-          if (wholeOption) {
-            return scope === "whole" ? wholeOption : options[0];
-          }
-          return options[1];
-        },
-        input: async (): Promise<string | undefined> => undefined,
-      },
-    };
+    });
   }
 
   it("records a whole-session grant on the serving node so later forwards and the parent's own action resolve without a second prompt", async () => {

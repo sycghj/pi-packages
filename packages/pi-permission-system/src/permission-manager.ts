@@ -21,7 +21,7 @@ import {
   evaluate,
   evaluateAnyValue,
   evaluateFirst,
-  pathMatchOptions,
+  floorAllowsToAsk,
   rewriteAsksToYolo,
 } from "./rule";
 import { mergeScopesWithOrigins } from "./scope-merge";
@@ -32,20 +32,15 @@ import {
 } from "./synthesize";
 import type {
   FlatPermissionConfig,
-  PathRuleTokenMatcher,
   PermissionCheckResult,
   PermissionState,
 } from "./types";
 import { isPermissionState } from "./types";
-import { wildcardMatch } from "./wildcard-matcher";
 
 const SPECIAL_PERMISSION_KEYS = new Set(["external_directory", "path"]);
 
 /** Universal fallback when permission["*"] is absent from all scopes. */
 const DEFAULT_UNIVERSAL_FALLBACK: PermissionState = "ask";
-
-/** Promotion predicate matching no token — the no-`path`-rules default (#509). */
-const NO_PROMOTION: PathRuleTokenMatcher = () => false;
 
 /** Default yolo reader — yolo disabled unless the composition root injects one. */
 const YOLO_DISABLED = (): boolean => false;
@@ -61,6 +56,12 @@ type ResolvedPermissions = {
    * Session rules are appended at call-time inside check().
    */
   composedRules: Ruleset;
+  /**
+   * Non-global scopes whose config file failed to load or validate. When
+   * non-empty the composed ruleset has been floored allow→ask (#646); the
+   * names also drive the fail-closed notice in {@link getConfigIssues}.
+   */
+  failClosedScopes: RuleOrigin[];
 };
 
 /**
@@ -83,15 +84,6 @@ export interface ScopedPermissionManager {
   ): PermissionCheckResult;
   getToolPermission(toolName: string, agentName?: string): PermissionState;
   getConfigIssues(agentName?: string): string[];
-  /**
-   * Build a predicate deciding whether a bare bash token should be promoted
-   * into the `path` rule-candidate surface (#509).
-   *
-   * Matches against specific (non-`*`) `path`-surface config rules whose
-   * action is `deny` or `ask` — an allow rule never gates, and `"*"` would
-   * promote every bare bash argument.
-   */
-  getPromotablePathTokenMatcher(agentName?: string): PathRuleTokenMatcher;
 }
 
 export interface PermissionManagerOptions extends PolicyLoaderOptions {
@@ -159,8 +151,16 @@ export class PermissionManager implements ScopedPermissionManager {
 
   getConfigIssues(agentName?: string): string[] {
     // Trigger a load/resolve to ensure issues are collected.
-    this.resolvePermissions(agentName);
-    return [...this.loader.getConfigIssues()];
+    const { failClosedScopes } = this.resolvePermissions(agentName);
+    const issues = [...this.loader.getConfigIssues()];
+    if (failClosedScopes.length > 0) {
+      issues.push(
+        `Invalid ${failClosedScopes.join(", ")} configuration detected — ` +
+          `failing closed: 'allow' rules are clamped to 'ask' for this session ` +
+          `until the configuration is corrected.`,
+      );
+    }
+    return issues;
   }
 
   getResolvedPolicyPaths(): ResolvedPolicyPaths {
@@ -222,7 +222,25 @@ export class PermissionManager implements ScopedPermissionManager {
       configRules,
     );
 
-    const value: ResolvedPermissions = { composedRules };
+    // Fail closed when a non-global scope's config is invalid: floor every
+    // `allow` (including one inherited from a lower scope) to `ask` so a
+    // higher scope meant to tighten policy cannot silently fail open (#646).
+    // Global is excluded — nothing more permissive is inherited when it fails.
+    const failClosedScopes: RuleOrigin[] = [];
+    if (projectConfig.invalid === true) failClosedScopes.push("project");
+    if (agentConfig.invalid === true) failClosedScopes.push("agent");
+    if (projectAgentConfig.invalid === true)
+      failClosedScopes.push("project-agent");
+
+    const effectiveRules =
+      failClosedScopes.length > 0
+        ? floorAllowsToAsk(composedRules)
+        : composedRules;
+
+    const value: ResolvedPermissions = {
+      composedRules: effectiveRules,
+      failClosedScopes,
+    };
     this.resolvedPermissionsCache.set(cacheKey, { stamp, value });
     return value;
   }
@@ -236,37 +254,6 @@ export class PermissionManager implements ScopedPermissionManager {
   getComposedConfigRules(agentName?: string): Ruleset {
     const { composedRules } = this.resolvePermissions(agentName);
     return composedRules.filter((r) => r.layer === "config");
-  }
-
-  /**
-   * Build a predicate deciding whether a bare bash token should be promoted
-   * into the `path` rule-candidate surface (#509).
-   *
-   * Filters the composed config ruleset to specific (non-`*`) `path`-surface
-   * deny/ask patterns, then returns a closure matching a token against them
-   * with the platform-correct fold (Windows case-and-separator matching, same
-   * as {@link pathMatchOptions} applies for evaluation) so promotion agrees
-   * with the later `path`-surface decision.
-   *
-   * Returns a matcher rejecting every token when no such rule exists — the
-   * default-config case is unaffected by promotion.
-   */
-  getPromotablePathTokenMatcher(agentName?: string): PathRuleTokenMatcher {
-    const { composedRules } = this.resolvePermissions(agentName);
-    const patterns = composedRules
-      .filter(
-        (r) =>
-          r.layer === "config" &&
-          r.surface === "path" &&
-          r.pattern !== "*" &&
-          r.action !== "allow",
-      )
-      .map((r) => r.pattern);
-    if (patterns.length === 0) return NO_PROMOTION;
-
-    const matchOptions = pathMatchOptions("path", this.flavor);
-    return (token) =>
-      patterns.some((pattern) => wildcardMatch(pattern, token, matchOptions));
   }
 
   /**

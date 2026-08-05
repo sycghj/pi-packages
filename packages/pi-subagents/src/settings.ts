@@ -14,6 +14,16 @@ export interface SubagentsSettings {
    */
   defaultMaxTurns?: number;
   graceTurns?: number;
+  /** Minutes a consumed agent's session is retained after its last relevance event. */
+  consumedSessionRetentionMinutes?: number;
+  /** Minutes an unconsumed agent's session is retained (safety cap). */
+  unconsumedSessionRetentionMinutes?: number;
+  /**
+   * When false, a parent interrupt (ESC) leaves background and queued subagents
+   * running. Foreground agents hold the parent's run signal directly, so they
+   * abort on ESC either way.
+   */
+  abortAllOnInterrupt?: boolean;
 }
 
 
@@ -22,6 +32,9 @@ export type SettingsEmit = (event: string, payload: unknown) => void;
 
 const DEFAULT_MAX_CONCURRENT = 4;
 const DEFAULT_GRACE_TURNS = 5;
+const DEFAULT_CONSUMED_RETENTION_MINUTES = 10;
+const DEFAULT_UNCONSUMED_RETENTION_MINUTES = 720;
+const DEFAULT_ABORT_ALL_ON_INTERRUPT = true;
 
 /**
  * Owns all three in-memory settings values and their load/save/persist cycle.
@@ -31,6 +44,9 @@ export class SettingsManager {
   private _defaultMaxTurns: number | undefined = undefined;
   private _graceTurns: number = DEFAULT_GRACE_TURNS;
   private _maxConcurrent: number = DEFAULT_MAX_CONCURRENT;
+  private _consumedSessionRetentionMinutes: number = DEFAULT_CONSUMED_RETENTION_MINUTES;
+  private _unconsumedSessionRetentionMinutes: number = DEFAULT_UNCONSUMED_RETENTION_MINUTES;
+  private _abortAllOnInterrupt: boolean = DEFAULT_ABORT_ALL_ON_INTERRUPT;
 
   private readonly emit: SettingsEmit;
   private readonly cwd: string;
@@ -78,6 +94,30 @@ export class SettingsManager {
     this._maxConcurrent = Math.max(1, n);
   }
 
+  // ── retention windows: clamped to [1, RETENTION_MINUTES_CEILING] minutes ──
+
+  get consumedSessionRetentionMinutes(): number {
+    return this._consumedSessionRetentionMinutes;
+  }
+
+  set consumedSessionRetentionMinutes(n: number) {
+    this._consumedSessionRetentionMinutes = clampRetentionMinutes(n);
+  }
+
+  get unconsumedSessionRetentionMinutes(): number {
+    return this._unconsumedSessionRetentionMinutes;
+  }
+
+  set unconsumedSessionRetentionMinutes(n: number) {
+    this._unconsumedSessionRetentionMinutes = clampRetentionMinutes(n);
+  }
+
+  // ── abortAllOnInterrupt: flipped via toggleAbortAllOnInterrupt(); no normalization ──
+
+  get abortAllOnInterrupt(): boolean {
+    return this._abortAllOnInterrupt;
+  }
+
   // ── Lifecycle methods ──
 
   /**
@@ -90,6 +130,12 @@ export class SettingsManager {
     if (typeof settings.maxConcurrent === "number") this.maxConcurrent = settings.maxConcurrent;
     if (typeof settings.defaultMaxTurns === "number") this.defaultMaxTurns = settings.defaultMaxTurns;
     if (typeof settings.graceTurns === "number") this.graceTurns = settings.graceTurns;
+    if (typeof settings.consumedSessionRetentionMinutes === "number")
+      this.consumedSessionRetentionMinutes = settings.consumedSessionRetentionMinutes;
+    if (typeof settings.unconsumedSessionRetentionMinutes === "number")
+      this.unconsumedSessionRetentionMinutes = settings.unconsumedSessionRetentionMinutes;
+    if (typeof settings.abortAllOnInterrupt === "boolean")
+      this._abortAllOnInterrupt = settings.abortAllOnInterrupt;
     this.emit("subagents:settings_loaded", { settings });
     return settings;
   }
@@ -98,11 +144,21 @@ export class SettingsManager {
    * Snapshot current in-memory values for persistence.
    * `defaultMaxTurns` uses 0 as the on-disk marker for unlimited (undefined).
    */
-  snapshot(): { maxConcurrent: number; defaultMaxTurns: number; graceTurns: number } {
+  snapshot(): {
+    maxConcurrent: number;
+    defaultMaxTurns: number;
+    graceTurns: number;
+    consumedSessionRetentionMinutes: number;
+    unconsumedSessionRetentionMinutes: number;
+    abortAllOnInterrupt: boolean;
+  } {
     return {
       maxConcurrent: this._maxConcurrent,
       defaultMaxTurns: this._defaultMaxTurns ?? 0,
       graceTurns: this._graceTurns,
+      consumedSessionRetentionMinutes: this._consumedSessionRetentionMinutes,
+      unconsumedSessionRetentionMinutes: this._unconsumedSessionRetentionMinutes,
+      abortAllOnInterrupt: this._abortAllOnInterrupt,
     };
   }
 
@@ -134,6 +190,29 @@ export class SettingsManager {
     return this.saveAndNotify(`Grace turns set to ${this.graceTurns}`);
   }
 
+  /** Set the consumed-session retention window (minutes), persist, and return the toast. */
+  applyConsumedSessionRetentionMinutes(n: number): { message: string; level: "info" | "warning" } {
+    this.consumedSessionRetentionMinutes = n; // setter normalizes: clamp [1, ceiling]
+    return this.saveAndNotify(`Consumed-session retention set to ${this.consumedSessionRetentionMinutes} min`);
+  }
+
+  /** Set the unconsumed-session retention window (minutes), persist, and return the toast. */
+  applyUnconsumedSessionRetentionMinutes(n: number): { message: string; level: "info" | "warning" } {
+    this.unconsumedSessionRetentionMinutes = n; // setter normalizes: clamp [1, ceiling]
+    return this.saveAndNotify(`Unconsumed-session retention set to ${this.unconsumedSessionRetentionMinutes} min`);
+  }
+
+  /**
+   * Flip whether a parent interrupt (ESC) aborts every subagent, persist, and
+   * return the toast. The manager owns the negation so callers just say "flip it".
+   */
+  toggleAbortAllOnInterrupt(): { message: string; level: "info" | "warning" } {
+    this._abortAllOnInterrupt = !this._abortAllOnInterrupt;
+    return this.saveAndNotify(
+      `Abort all subagents on ESC: ${this._abortAllOnInterrupt ? "on" : "off"}`,
+    );
+  }
+
   /**
    * Persist the current snapshot, emit `subagents:settings_changed`,
    * and return the toast the UI should display.
@@ -152,6 +231,18 @@ export class SettingsManager {
 const MAX_CONCURRENT_CEILING = 1024;
 const MAX_TURNS_CEILING = 10_000;
 const GRACE_TURNS_CEILING = 1_000;
+// Retention windows: 1 minute floor, two-week ceiling (60 * 24 * 14).
+const RETENTION_MINUTES_CEILING = 20_160;
+
+/** Clamp a retention window to [1, RETENTION_MINUTES_CEILING] minutes. */
+function clampRetentionMinutes(n: number): number {
+  return Math.min(RETENTION_MINUTES_CEILING, Math.max(1, n));
+}
+
+/** True when a value is an integer minute count within the accepted retention range. */
+function isRetentionMinutes(n: unknown): n is number {
+  return Number.isInteger(n) && (n as number) >= 1 && (n as number) <= RETENTION_MINUTES_CEILING;
+}
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
 function sanitize(raw: unknown): SubagentsSettings {
@@ -178,6 +269,15 @@ function sanitize(raw: unknown): SubagentsSettings {
     (r.graceTurns as number) <= GRACE_TURNS_CEILING
   ) {
     out.graceTurns = r.graceTurns as number;
+  }
+  if (isRetentionMinutes(r.consumedSessionRetentionMinutes)) {
+    out.consumedSessionRetentionMinutes = r.consumedSessionRetentionMinutes;
+  }
+  if (isRetentionMinutes(r.unconsumedSessionRetentionMinutes)) {
+    out.unconsumedSessionRetentionMinutes = r.unconsumedSessionRetentionMinutes;
+  }
+  if (typeof r.abortAllOnInterrupt === "boolean") {
+    out.abortAllOnInterrupt = r.abortAllOnInterrupt;
   }
   return out;
 }

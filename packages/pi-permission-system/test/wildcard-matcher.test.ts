@@ -186,8 +186,16 @@ describe("findCompiledWildcardMatchForNames", () => {
     const compiled = compileWildcardPattern("bash *", "ask");
     expect(compiled.pattern).toBe("bash *");
     expect(compiled.state).toBe("ask");
-    expect(compiled.regex.test("bash ls -la")).toBe(true);
-    expect(compiled.regex.test("echo hello")).toBe(false);
+    expect(compiled.matches("bash ls -la")).toBe(true);
+    expect(compiled.matches("echo hello")).toBe(false);
+  });
+
+  test("a compiled pattern folds the value it is handed (#653)", () => {
+    const compiled = compileWildcardPattern("/dev/*", "allow", {
+      windowsSeparators: true,
+    });
+    expect(compiled.matches("/dev/null")).toBe(true);
+    expect(compiled.matches("\\dev\\null")).toBe(true);
   });
 });
 
@@ -209,9 +217,9 @@ describe("wildcardMatch", () => {
     expect(wildcardMatch("node *", command)).toBe(true);
   });
 
-  test("compileWildcardPattern regex matches multiline string", () => {
+  test("compileWildcardPattern matches a multiline string", () => {
     const compiled = compileWildcardPattern("*", "allow");
-    expect(compiled.regex.test("a\nb")).toBe(true);
+    expect(compiled.matches("a\nb")).toBe(true);
   });
 
   test("exact pattern matches identical value", () => {
@@ -327,6 +335,46 @@ describe("wildcardMatch", () => {
       ).toBe(true);
     });
   });
+
+  describe("windowsSeparators folds both operands (#653)", () => {
+    test("a forward-slash pattern matches a forward-slash value", () => {
+      expect(
+        wildcardMatch("/dev/null", "/dev/null", { windowsSeparators: true }),
+      ).toBe(true);
+    });
+
+    test("a forward-slash glob matches a forward-slash device value", () => {
+      expect(
+        wildcardMatch("/dev/*", "/dev/null", {
+          caseInsensitive: true,
+          windowsSeparators: true,
+        }),
+      ).toBe(true);
+    });
+
+    test("a forward-slash relative pattern matches a forward-slash value", () => {
+      expect(
+        wildcardMatch("src/*", "src/foo.ts", { windowsSeparators: true }),
+      ).toBe(true);
+    });
+
+    test("a backslash pattern matches a forward-slash value", () => {
+      expect(
+        wildcardMatch("src\\*", "src/foo.ts", { windowsSeparators: true }),
+      ).toBe(true);
+    });
+
+    test("the value fold is off by default", () => {
+      expect(wildcardMatch("src\\*", "src/foo.ts")).toBe(false);
+      expect(wildcardMatch("/dev/null", "\\dev\\null")).toBe(false);
+    });
+
+    test("folding separators does not make unrelated values match", () => {
+      expect(
+        wildcardMatch("/dev/null", "/dev/stdout", { windowsSeparators: true }),
+      ).toBe(false);
+    });
+  });
 });
 
 describe("? single-character wildcard", () => {
@@ -378,12 +426,12 @@ describe("? single-character wildcard", () => {
 
 describe("home path expansion in patterns", () => {
   test("wildcardMatch expands ~ prefix in pattern before matching", () => {
-    const expandedPath = join(FAKE_HOME, "dev/project");
+    const expandedPath = `${FAKE_HOME}/dev/project`;
     expect(wildcardMatch("~/dev/project", expandedPath)).toBe(true);
   });
 
   test("wildcardMatch expands ~/glob in pattern", () => {
-    const expandedFile = join(FAKE_HOME, "dev/project/file.ts");
+    const expandedFile = `${FAKE_HOME}/dev/project/file.ts`;
     expect(wildcardMatch("~/dev/*", expandedFile)).toBe(true);
   });
 
@@ -392,12 +440,12 @@ describe("home path expansion in patterns", () => {
   });
 
   test("wildcardMatch expands $HOME prefix in pattern before matching", () => {
-    const expandedPath = join(FAKE_HOME, "dev/project");
+    const expandedPath = `${FAKE_HOME}/dev/project`;
     expect(wildcardMatch("$HOME/dev/project", expandedPath)).toBe(true);
   });
 
   test("wildcardMatch expands $HOME/glob in pattern", () => {
-    const expandedFile = join(FAKE_HOME, "work/file.ts");
+    const expandedFile = `${FAKE_HOME}/work/file.ts`;
     expect(wildcardMatch("$HOME/work/*", expandedFile)).toBe(true);
   });
 
@@ -411,10 +459,10 @@ describe("home path expansion in patterns", () => {
     expect(compiled.pattern).toBe("$HOME/dev/*");
   });
 
-  test("compileWildcardPattern expanded regex matches the expanded path", () => {
+  test("compileWildcardPattern expanded pattern matches the expanded path", () => {
     const compiled = compileWildcardPattern("~/dev/*", "allow");
-    const expandedFile = join(FAKE_HOME, "dev/file.ts");
-    expect(compiled.regex.test(expandedFile)).toBe(true);
+    const expandedFile = `${FAKE_HOME}/dev/file.ts`;
+    expect(compiled.matches(expandedFile)).toBe(true);
   });
 
   test("non-home pattern is unaffected", () => {

@@ -43,6 +43,11 @@ Read `docs/plans/` before making architectural changes.
 - Test multiple formatter chains for the same file type.
 - Test config loading, merge precedence, and validation issues.
 
+Vitest splits this package into two projects.
+`pnpm test` runs the `unit` project only, so a green run does **not** exercise the real `pi` CLI; `pnpm run test:acceptance` runs the real-CLI suite and `pnpm run test:all` runs both.
+The split keeps those child-process spawns off the workspace-wide `pnpm -r run test`, where they used to time out under load and red a package the session never touched (Refs #678).
+When adding a test that calls `runRpcSession`, add its path to `ACCEPTANCE_FILES` in `test/acceptance-files.ts` — `test/project-partition.test.ts` fails if you do not.
+
 ## Notes for Agents
 
 Before implementing, understand:

@@ -5,7 +5,7 @@ import {
 } from "#src/access-intent/bash/node-text";
 import type { TSNode } from "#src/access-intent/bash/parser";
 import {
-  classifyPromotedRuleCandidate,
+  classifyBareTokenCandidate,
   classifyTokenAsPathCandidate,
   classifyTokenAsRuleCandidate,
 } from "#src/access-intent/bash/token-classification";
@@ -18,10 +18,6 @@ import {
 import { normalizePathPolicyLiteral } from "#src/access-intent/path-normalization";
 import type { PathNormalizer } from "#src/path-normalizer";
 import { isSafeSystemPath } from "#src/safe-system-paths";
-import type { PathRuleTokenMatcher } from "#src/types";
-
-/** Default promotion predicate: promotes nothing (#509). */
-const NO_PROMOTION: PathRuleTokenMatcher = () => false;
 
 // ── Internal types ───────────────────────────────────────────────────────────
 
@@ -85,22 +81,20 @@ const UNKNOWN_BASE: EffectiveBase = { kind: "unknown" };
  * (`forPath`/`forLiteral`/`resolveBase`), and the outside-cwd boundary
  * decision — so no walk step re-reads the platform or threads the cwd.
  *
- * Also holds an `isPromotablePathToken` predicate (default: promotes nothing)
- * deciding whether a bare token that fails the broad rule-candidate shape gate
- * should still be promoted because it matches an active, specific `path` rule
- * (#509). The resolver never sees the rules themselves — the predicate is
- * built and owned by `PermissionManager.getPromotablePathTokenMatcher`.
+ * A bare token that fails both shape gates is admitted when the normalizer's
+ * existence probe says it names a real filesystem entry (ADR 0009, #645). The
+ * resolver consults no ruleset: candidacy is a filesystem question, and the
+ * policy decision belongs to the gates downstream.
  *
  * Tell-don't-ask: callers hand it a parsed tree and receive the resolved
  * {@link ResolvedBashPaths} slices in one {@link resolve} call; the AST walk,
  * the `cd`-folding state, and the intermediate path candidates stay private.
  * One instance per parse ({@link BashProgram.parse} constructs it with the
- * session normalizer and promotion predicate).
+ * session normalizer).
  */
 export class BashPathResolver {
   constructor(
     private readonly normalizer: PathNormalizer,
-    private readonly isPromotablePathToken: PathRuleTokenMatcher = NO_PROMOTION,
     private readonly workdir?: string,
   ) {}
 
@@ -426,7 +420,14 @@ export class BashPathResolver {
 
     for (const { token, base } of candidates) {
       const candidate = classifyTokenAsPathCandidate(token);
-      if (!candidate) continue;
+      if (!candidate) {
+        // A bare token the strict shape gate rejects can still escape the tree
+        // through a symlink, so probe it and apply the ordinary boundary
+        // decision to whatever it resolves to (#645).
+        const probed = this.probeBareToken(token, base);
+        if (probed) this.collectIfExternal(probed.path, seen, externalPaths);
+        continue;
+      }
 
       // Unknown effective directory: a relative candidate could resolve
       // anywhere, so flag it conservatively (resolved against the baked cwd
@@ -446,34 +447,48 @@ export class BashPathResolver {
         base.kind === "known"
           ? this.normalizer.resolveBase(base.offset)
           : undefined;
-      const accessPath = this.normalizer.forBashToken(candidate, {
-        resolveBase,
-      });
-      const lexical = accessPath.value();
-      if (!lexical) continue;
-      // The boundary decision and dedup identity use the canonical
-      // (symlink-resolved) form the AccessPath already derived, but the returned
-      // value is the lexical form so config patterns match the path as the user
-      // typed it (#418). A win32 device path preserves `/dev/null` as its
-      // boundary value, so `isBoundaryOutsideWorkingDirectory` reaches the
-      // safe-path exclusion (#533).
-      const canonical = accessPath.boundaryValue();
-      // A literal-only bash token (a win32 non-mount POSIX absolute like `/tmp`)
-      // has no canonical form; it is foreign to the win32 cwd, so it is always
-      // external. Its lexical value is the dedup identity so two distinct
-      // literal-only paths do not collapse (#533).
-      const isExternal = canonical
-        ? this.normalizer.isBoundaryOutsideWorkingDirectory(canonical)
-        : true;
-      const dedupKey = canonical || lexical;
-
-      if (isExternal && !seen.has(dedupKey)) {
-        seen.add(dedupKey);
-        externalPaths.push(accessPath);
-      }
+      this.collectIfExternal(
+        this.normalizer.forBashToken(candidate, { resolveBase }),
+        seen,
+        externalPaths,
+      );
     }
 
     return externalPaths;
+  }
+
+  /**
+   * Record `accessPath` when it resolves outside the working directory and has
+   * not already been collected.
+   *
+   * The boundary decision and dedup identity use the canonical
+   * (symlink-resolved) form the {@link AccessPath} already derived, while the
+   * stored value keeps the lexical form so config patterns match the path as
+   * the user typed it (#418). A win32 device path preserves `/dev/null` as its
+   * boundary value, so `isBoundaryOutsideWorkingDirectory` reaches the
+   * safe-path exclusion (#533).
+   *
+   * A literal-only bash token (a win32 non-mount POSIX absolute like `/tmp`)
+   * has no canonical form; it is foreign to the win32 cwd, so it is always
+   * external. Its lexical value is the dedup identity so two distinct
+   * literal-only paths do not collapse (#533).
+   */
+  private collectIfExternal(
+    accessPath: AccessPath,
+    seen: Set<string>,
+    out: AccessPath[],
+  ): void {
+    const lexical = accessPath.value();
+    if (!lexical) return;
+    const canonical = accessPath.boundaryValue();
+    const isExternal = canonical
+      ? this.normalizer.isBoundaryOutsideWorkingDirectory(canonical)
+      : true;
+    const dedupKey = canonical || lexical;
+    if (isExternal && !seen.has(dedupKey)) {
+      seen.add(dedupKey);
+      out.push(accessPath);
+    }
   }
 
   /**
@@ -481,10 +496,9 @@ export class BashPathResolver {
    * policy lookup values.
    *
    * Filters candidates through the broad path classifier
-   * (`classifyTokenAsRuleCandidate`), falling back to the rule-driven promoted
-   * classifier (`classifyPromotedRuleCandidate`, #509) for a bare token the
-   * broad classifier rejects for shape — promoted only when the injected
-   * `isPromotablePathToken` predicate matches an active, specific `path` rule.
+   * (`classifyTokenAsRuleCandidate`), falling back to {@link probeBareToken}
+   * for a bare token the broad classifier rejects for shape — admitted only
+   * when it names an existing filesystem entry (#645).
    * On win32 the broad classifier is told to treat a backslash as a path
    * separator, so a backslash-relative token (`dir\file`) is recognized as a
    * rule candidate the same as its forward-slash equivalent (#520); on POSIX
@@ -501,22 +515,60 @@ export class BashPathResolver {
     const result: BashPathRuleCandidate[] = [];
 
     for (const { token, base } of candidates) {
+      const shaped = classifyTokenAsRuleCandidate(
+        token,
+        this.normalizer.flavor,
+      );
       const candidate =
-        classifyTokenAsRuleCandidate(token, this.normalizer.flavor) ??
-        classifyPromotedRuleCandidate(token, this.isPromotablePathToken);
+        shaped === null
+          ? this.probeBareToken(token, base)
+          : { token: shaped, path: this.buildRuleCandidatePath(shaped, base) };
       if (!candidate) continue;
 
-      const path = this.buildRuleCandidatePath(candidate, base);
-      const matchValues = path.matchValues();
+      const matchValues = candidate.path.matchValues();
       if (matchValues.length === 0) continue;
 
       const key = matchValues.join("\0");
       if (seen.has(key)) continue;
       seen.add(key);
-      result.push({ token: candidate, path });
+      result.push(candidate);
     }
 
     return result;
+  }
+
+  /**
+   * Promote a bare token the shape gates rejected, when it names an existing
+   * filesystem entry — the existence probe (ADR 0009, #645).
+   *
+   * Most bash argument tokens are not paths (`status`, `build`, `main`), so a
+   * bare token is admitted only when the filesystem confirms it names something
+   * real. Candidacy therefore comes from the filesystem and never from the
+   * ruleset, which keeps the classifiers pure and lets a symlink be matched by
+   * rules naming its *target* — the case raw-token matching could not see.
+   *
+   * Returns `null` when the token's shape rules out a path, when the effective
+   * base is unknown (no concrete directory to resolve against, so the token
+   * stays unpromoted per #393 conservatism), or when nothing exists at the
+   * resolved location.
+   *
+   * Shared by both projections so a promoted token is identical whether it is
+   * being matched against `path` rules or tested against the cwd boundary.
+   */
+  private probeBareToken(
+    token: string,
+    base: EffectiveBase,
+  ): BashPathRuleCandidate | null {
+    const bare = classifyBareTokenCandidate(token);
+    if (bare === null) return null;
+    if (base.kind !== "known") return null;
+
+    const path = this.normalizer.forBashToken(bare, {
+      resolveBase: this.normalizer.resolveBase(base.offset),
+    });
+    const lexical = path.value();
+    if (!lexical || !this.normalizer.entryExists(lexical)) return null;
+    return { token: bare, path };
   }
 
   private buildRuleCandidatePath(

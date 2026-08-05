@@ -14,6 +14,10 @@ The footer is a bare statement of fact, not a rule, so the habit of prefixing co
 This extension hooks `before_agent_start` and appends a block that adds the missing prohibition — forbidding both the literal `cd <path> &&` form and the generic `cd $(pwd) &&` form.
 It repeats the literal resolved path (from `ctx.cwd`) only to make the forbidden `cd <path> &&` example concrete, not because the path is otherwise unavailable to the agent.
 
+Because the block names a literal path, it has to be rebuilt for each session that carries it.
+A subagent inherits its parent's system prompt verbatim, so a child sees a block naming the parent's directory — and a child given an isolated workspace (for example a git worktree from [@gotgenes/pi-subagents-worktrees](https://www.npmjs.com/package/@gotgenes/pi-subagents-worktrees)) would be told that shell commands already execute somewhere they do not.
+An inherited block is therefore rewritten to name the current session's directory rather than deferred to.
+
 ## Install
 
 ```bash
@@ -40,13 +44,15 @@ Never prefix a command with `cd` into the current working directory — neither 
 Just run the command directly.
 ```
 
-The append is idempotent: if a `# Working Directory` block is already present (e.g. another `before_agent_start` handler added one), the prompt is returned unchanged.
+The result is idempotent: a prompt that already carries the block for this directory is returned unchanged, so chained `before_agent_start` handlers do not stack duplicates.
+A block naming a *different* directory — one inherited from a parent session — is rewritten in place, keeping its position stable across turns.
+A section under the same heading that this extension did not write (e.g. another handler's) is left alone: a block is recognized by its heading *and* its `Shell commands already execute in` sentence, not the heading alone.
 
 ## How it works
 
-| Hook                 | Behavior                                                                          |
-| -------------------- | --------------------------------------------------------------------------------- |
-| `before_agent_start` | Appends the working-directory block, naming the resolved `ctx.cwd`, to the prompt |
+| Hook                 | Behavior                                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `before_agent_start` | Ensures the prompt carries the working-directory block for the resolved `ctx.cwd`, appending or rewriting it as needed |
 
 ## License
 

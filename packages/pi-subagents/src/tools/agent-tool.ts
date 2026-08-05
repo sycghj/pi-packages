@@ -12,6 +12,7 @@ import { renderAgentResult } from "#src/tools/result-renderer";
 import { type ModelInfo, resolveSpawnConfig } from "#src/tools/spawn-config";
 import type { ParentSessionInfo, Subagent } from "#src/types";
 import { type AgentDetails, getDisplayName, type Theme } from "#src/ui/display";
+import { GLYPHS } from "#src/ui/glyphs";
 
 // ---- Deps interfaces ----
 
@@ -84,10 +85,15 @@ export class AgentTool {
 			const existing = this.manager.getRecord(params.resume as string);
 			if (!existing) {
 				return textResult(
-					`Agent not found: "${params.resume as string}". It may have been cleaned up.`,
+					`Agent not found: "${params.resume as string}". Records are cleared at session start/switch, so it may be from a previous session.`,
 				);
 			}
 			if (!existing.isSessionReady()) {
+				if (existing.sessionReleased) {
+					return textResult(
+						`Agent "${params.resume as string}" had its session released after its retention window; resume is unavailable, but its result is still retrievable via get_subagent_result.`,
+					);
+				}
 				return textResult(
 					`Agent "${params.resume as string}" has no active session to resume.`,
 				);
@@ -100,6 +106,8 @@ export class AgentTool {
 			if (!record) {
 				return textResult(`Failed to resume agent "${params.resume as string}".`);
 			}
+			// Resume-return delivery edge: the resumed outcome is returned directly.
+			record.markConsumed();
 			return textResult(
 				record.result?.trim() ?? record.error?.trim() ?? "No output.",
 				buildDetails(config.presentation.detailBase, record),
@@ -212,7 +220,7 @@ ${guidelines}
 					: "Subagent";
 				const desc = (args.description as string | undefined) ?? "";
 				return new Text(
-					"▸ " +
+					`${GLYPHS.toolCall} ` +
 						theme.fg("toolTitle", theme.bold(displayName)) +
 						(desc ? "  " + theme.fg("muted", desc) : ""),
 					0,

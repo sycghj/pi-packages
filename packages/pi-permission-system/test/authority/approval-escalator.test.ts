@@ -139,6 +139,114 @@ describe("ParentAuthorizer", () => {
     }
   });
 
+  test("stamps the child-fixed access intent with requester identity onto the forwarded request", async () => {
+    const temp = createForwardingTempDir("parent-session");
+    try {
+      const registry = makeSubagentRegistry("child-session", {
+        parentSessionId: "parent-session",
+      });
+      const authorizer = new ParentAuthorizer(
+        makeForwarderContext({
+          hasUI: false,
+          sessionId: "child-session",
+          cwd: "/worktree/issue-42",
+        }),
+        {
+          forwardingDir: temp.forwardingDir,
+          registry,
+          logger: { review: () => {}, debug: () => {} },
+        },
+      );
+
+      const decisionPromise = authorizer.authorize({
+        requestId: "unused-by-parent-authorizer",
+        source: "tool_call",
+        agentName: "Explore",
+        message: "Allow this path access?",
+        toolName: "read",
+        path: "src/foo.ts",
+        accessIntent: {
+          surface: "path",
+          matchValues: ["/worktree/issue-42/src/foo.ts", "src/foo.ts"],
+          boundaryValue: "/worktree/issue-42/src/foo.ts",
+        },
+      });
+
+      const request = await waitForRequestFile(temp.location.requestsDir);
+      // The display fields still ride the same request alongside the structured
+      // intent (the #292/#557 non-degraded-broadcast contract must not regress).
+      expect(request.source).toBe("tool_call");
+      expect(request.surface).toBe("read");
+      expect(request.value).toBe("src/foo.ts");
+      // requesterCwd comes from ctx.cwd; principal mirrors the request's own
+      // computed identity fields (sessionId, requesterAgentName).
+      expect(request.accessIntent).toEqual({
+        surface: "path",
+        matchValues: ["/worktree/issue-42/src/foo.ts", "src/foo.ts"],
+        boundaryValue: "/worktree/issue-42/src/foo.ts",
+        requesterCwd: "/worktree/issue-42",
+        principal: {
+          sessionId: request.requesterSessionId,
+          agentName: request.requesterAgentName,
+        },
+      });
+
+      writeFileSync(
+        join(temp.location.responsesDir, `${request.id}.json`),
+        JSON.stringify({
+          approved: true,
+          state: "approved",
+          responderSessionId: "parent-session",
+        }),
+        "utf-8",
+      );
+      await decisionPromise;
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  test("omits accessIntent from the request when the details carry none", async () => {
+    const temp = createForwardingTempDir("parent-session");
+    try {
+      const registry = makeSubagentRegistry("child-session", {
+        parentSessionId: "parent-session",
+      });
+      const authorizer = new ParentAuthorizer(
+        makeForwarderContext({ hasUI: false, sessionId: "child-session" }),
+        {
+          forwardingDir: temp.forwardingDir,
+          registry,
+          logger: { review: () => {}, debug: () => {} },
+        },
+      );
+
+      const decisionPromise = authorizer.authorize({
+        requestId: "unused-by-parent-authorizer",
+        source: "tool_call",
+        agentName: "Explore",
+        message: "Allow read?",
+        toolName: "read",
+      });
+
+      const request = await waitForRequestFile(temp.location.requestsDir);
+      expect(request.accessIntent).toBeUndefined();
+
+      writeFileSync(
+        join(temp.location.responsesDir, `${request.id}.json`),
+        JSON.stringify({
+          approved: true,
+          state: "approved",
+          responderSessionId: "parent-session",
+        }),
+        "utf-8",
+      );
+      await decisionPromise;
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   test("omits sessionApproval from the request when the details carry none", async () => {
     const temp = createForwardingTempDir("parent-session");
     try {

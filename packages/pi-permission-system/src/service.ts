@@ -11,10 +11,32 @@
  * reference — this ensures resilience across `/reload` and load-order edge cases.
  */
 
+import type { Authorizer } from "./authority/authorizer";
 import type { ToolAccessExtractor } from "./tool-access-extractor-registry";
 import type { ToolInputFormatter } from "./tool-input-formatter-registry";
 import type { PermissionCheckResult, PermissionState } from "./types";
 
+export type {
+  Authorizer,
+  AuthorizerVerdict,
+} from "./authority/authorizer";
+
+/**
+ * The narrow review-log seam handed to a chain link at `authorize` time
+ * (ADR 0007 §3, same injection pattern as {@link PermissionQuery}).
+ *
+ * A link uses it to record a positive decision trail to the permission review
+ * log — `review` for the durable, default-on audit entry (one per handled
+ * ask), `debug` for verbose or short-circuit detail gated behind the
+ * `debugLog` toggle. The session's own logger is passed straight through, so a
+ * link's entries land in the same `pi-permission-system-permission-review.jsonl`
+ * as the gate decisions, keying to a gate entry by `requestId`.
+ */
+export interface AuthorizerLog {
+  review(event: string, details?: Record<string, unknown>): void;
+  debug(event: string, details?: Record<string, unknown>): void;
+}
+export type { PromptPermissionDetails } from "./authority/permission-prompter";
 export type {
   ForwardedPromptContext,
   PermissionDecisionEvent,
@@ -33,13 +55,12 @@ export type { PermissionCheckResult, PermissionState, ToolInputFormatter };
 const SERVICE_KEY = Symbol.for("@gotgenes/pi-permission-system:service");
 
 /**
- * Public interface exposed to other extensions via `getPermissionsService()`.
- *
- * `checkPermission` takes a surface + optional value + optional agent name,
- * and delegates to `PermissionManager.checkPermission()` with current session
- * rules internally.
+ * The narrow, read-only projection of {@link PermissionsService}: answer a
+ * policy query for a surface, and report a tool-level state. This is the
+ * capability an Authorizer chain link is handed (ISP) — it never sees the
+ * registration surface.
  */
-export interface PermissionsService {
+export interface PermissionQuery {
   /**
    * Query the permission policy for a surface and value.
    *
@@ -57,6 +78,28 @@ export interface PermissionsService {
     agentName?: string,
   ): PermissionCheckResult;
 
+  /**
+   * Query the tool-level permission state for pre-filtering tools before
+   * creating a child session.
+   *
+   * Returns `"deny"` | `"allow"` | `"ask"` based on the composed policy.
+   * Does not consider command-level rules (e.g. per-bash-command patterns) —
+   * use `checkPermission` for runtime invocation gates.
+   *
+   * @param toolName  - Tool name (e.g. `"bash"`, `"read"`, `"my-extension:tool"`).
+   * @param agentName - Optional agent name for per-agent policy resolution.
+   */
+  getToolPermission(toolName: string, agentName?: string): PermissionState;
+}
+
+/**
+ * Public interface exposed to other extensions via `getPermissionsService()`.
+ *
+ * `checkPermission` takes a surface + optional value + optional agent name,
+ * and delegates to `PermissionManager.checkPermission()` with current session
+ * rules internally.
+ */
+export interface PermissionsService extends PermissionQuery {
   /**
    * Register a custom preview formatter for a specific tool name.
    *
@@ -100,17 +143,31 @@ export interface PermissionsService {
   ): () => void;
 
   /**
-   * Query the tool-level permission state for pre-filtering tools before
-   * creating a child session.
+   * Register a named live-authority chain link (ADR 0007 §4).
    *
-   * Returns `"deny"` | `"allow"` | `"ask"` based on the composed policy.
-   * Does not consider command-level rules (e.g. per-bash-command patterns) —
-   * use `checkPermission` for runtime invocation gates.
+   * A link reviews an `ask` and returns `allow` / `deny` (with an optional
+   * teaching `reason`) / `defer`. It is handed a narrow, session-scoped
+   * {@link PermissionQuery} at `authorize` time so it can query the
+   * deterministic engine at gate parity. Register from a `permissions:ready`
+   * handler so registration is robust to load order and survives `/reload`.
    *
-   * @param toolName  - Tool name (e.g. `"bash"`, `"read"`, `"my-extension:tool"`).
-   * @param agentName - Optional agent name for per-agent policy resolution.
+   * Registration alone grants **no authority**: the link decides nothing until
+   * the operator names it in the `authorizerChain` config (opt-in activation),
+   * and the chain owner caps every verdict with the bounded-delegation
+   * checkpoint (an `allow` on an excluded surface downgrades to `defer`). Only
+   * one link may be registered per name — a second call for the same name
+   * throws. The returned disposer unregisters the link.
+   *
+   * @param name      - Operator-facing link name referenced from `authorizerChain`.
+   * @param authorize - The link's decision callback
+   *                    (`(details, query, log) => verdict`); `log` is an
+   *                    {@link AuthorizerLog} for recording a decision trail to
+   *                    the shared permission review log.
    */
-  getToolPermission(toolName: string, agentName?: string): PermissionState;
+  registerAuthorizer(
+    name: string,
+    authorize: Authorizer["authorize"],
+  ): () => void;
 }
 
 /**

@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { SubagentState } from "#src/lifecycle/subagent-state";
+import {
+	isActiveStatus,
+	isRunningStatus,
+	isTerminalErrorStatus,
+	SubagentState,
+	type SubagentStatus,
+} from "#src/lifecycle/subagent-state";
+
+const ALL_STATUSES: SubagentStatus[] = [
+	"queued",
+	"running",
+	"completed",
+	"steered",
+	"aborted",
+	"stopped",
+	"error",
+];
 
 describe("SubagentState — constructor", () => {
 	it("defaults status to 'queued'", () => {
@@ -22,6 +38,13 @@ describe("SubagentState — constructor", () => {
 		expect(state.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
 	});
 
+	it("defaults live-activity fields", () => {
+		const state = new SubagentState();
+		expect(state.turnCount).toBe(1);
+		expect(state.responseText).toBe("");
+		expect(state.activeTools.size).toBe(0);
+	});
+
 	it("passes through optional transition fields", () => {
 		const state = new SubagentState({
 			status: "completed",
@@ -42,6 +65,45 @@ describe("SubagentState — constructor", () => {
 		expect(state.result).toBeUndefined();
 		expect(state.error).toBeUndefined();
 		expect(state.completedAt).toBeUndefined();
+	});
+});
+
+describe("SubagentState — constructor full-value seeding", () => {
+	it("seeds stats fields", () => {
+		const state = new SubagentState({
+			toolUses: 4,
+			lifetimeUsage: { input: 100, output: 200, cacheWrite: 30 },
+			compactionCount: 2,
+		});
+		expect(state.toolUses).toBe(4);
+		expect(state.lifetimeUsage).toEqual({ input: 100, output: 200, cacheWrite: 30 });
+		expect(state.compactionCount).toBe(2);
+	});
+
+	it("copies lifetimeUsage so mutating the source does not change state", () => {
+		const source = { input: 10, output: 20, cacheWrite: 5 };
+		const state = new SubagentState({ lifetimeUsage: source });
+		source.input = 999;
+		expect(state.lifetimeUsage).toEqual({ input: 10, output: 20, cacheWrite: 5 });
+	});
+
+	it("seeds live-activity fields", () => {
+		const state = new SubagentState({
+			turnCount: 3,
+			activeTools: ["read", "bash"],
+			responseText: "partial output",
+		});
+		expect(state.turnCount).toBe(3);
+		expect([...state.activeTools.values()]).toEqual(["read", "bash"]);
+		expect(state.responseText).toBe("partial output");
+	});
+
+	it("seeds activeTools by name and stays removable by name", () => {
+		const state = new SubagentState({ activeTools: ["read", "read"] });
+		expect(state.activeTools.size).toBe(2);
+		state.removeActiveTool("read");
+		expect(state.activeTools.size).toBe(1);
+		expect([...state.activeTools.values()]).toEqual(["read"]);
 	});
 });
 
@@ -175,6 +237,49 @@ describe("SubagentState — markStopped", () => {
 		state.markStopped(8000);
 		expect(state.status).toBe("stopped");
 	});
+
+	it("leaves stoppedWhileQueued false — the agent had started", () => {
+		const state = new SubagentState({ status: "running" });
+		state.markStopped(8000);
+		expect(state.stoppedWhileQueued).toBe(false);
+	});
+});
+
+describe("SubagentState — stopQueued", () => {
+	it("sets status to 'stopped' and completedAt", () => {
+		const state = new SubagentState({ status: "queued" });
+		state.stopQueued(7000);
+		expect(state.status).toBe("stopped");
+		expect(state.completedAt).toBe(7000);
+	});
+
+	it("records that the agent never started", () => {
+		const state = new SubagentState({ status: "queued" });
+		expect(state.stoppedWhileQueued).toBe(false);
+		state.stopQueued(7000);
+		expect(state.stoppedWhileQueued).toBe(true);
+	});
+
+	it("defaults completedAt to Date.now() when not provided", () => {
+		const state = new SubagentState({ status: "queued" });
+		const before = Date.now();
+		state.stopQueued();
+		const after = Date.now();
+		expect(state.completedAt).toBeGreaterThanOrEqual(before);
+		expect(state.completedAt).toBeLessThanOrEqual(after);
+	});
+
+	it("stops an already-running agent without claiming it never started", () => {
+		const state = new SubagentState({ status: "running" });
+		state.stopQueued(7000);
+		expect(state.status).toBe("stopped");
+		expect(state.stoppedWhileQueued).toBe(false);
+	});
+
+	it("seeds stoppedWhileQueued from init", () => {
+		const state = new SubagentState({ status: "stopped", stoppedWhileQueued: true });
+		expect(state.stoppedWhileQueued).toBe(true);
+	});
 });
 
 describe("SubagentState — incrementToolUses", () => {
@@ -229,6 +334,50 @@ describe("SubagentState — resetForResume", () => {
 		expect(state.completedAt).toBeUndefined();
 		expect(state.result).toBeUndefined();
 		expect(state.error).toBeUndefined();
+	});
+
+	it("clears consumedAt so a resumed run creates a new pending outcome", () => {
+		const state = new SubagentState({ status: "completed", consumedAt: 5000 });
+		state.resetForResume(9000);
+		expect(state.consumedAt).toBeUndefined();
+		expect(state.consumed).toBe(false);
+	});
+});
+
+describe("SubagentState — consumption", () => {
+	it("defaults to not consumed", () => {
+		const state = new SubagentState();
+		expect(state.consumed).toBe(false);
+		expect(state.consumedAt).toBeUndefined();
+	});
+
+	it("markConsumed sets consumedAt and flips consumed true", () => {
+		const state = new SubagentState({ status: "completed" });
+		state.markConsumed(5000);
+		expect(state.consumed).toBe(true);
+		expect(state.consumedAt).toBe(5000);
+	});
+
+	it("markConsumed defaults consumedAt to Date.now() when not provided", () => {
+		const state = new SubagentState({ status: "completed" });
+		const before = Date.now();
+		state.markConsumed();
+		const after = Date.now();
+		expect(state.consumedAt).toBeGreaterThanOrEqual(before);
+		expect(state.consumedAt).toBeLessThanOrEqual(after);
+	});
+
+	it("markConsumed keeps the first collection time (idempotent ??=)", () => {
+		const state = new SubagentState({ status: "completed" });
+		state.markConsumed(5000);
+		state.markConsumed(9999);
+		expect(state.consumedAt).toBe(5000);
+	});
+
+	it("seeds consumedAt from the constructor", () => {
+		const state = new SubagentState({ status: "completed", consumedAt: 4200 });
+		expect(state.consumed).toBe(true);
+		expect(state.consumedAt).toBe(4200);
 	});
 });
 
@@ -332,5 +481,37 @@ describe("SubagentState — responseText", () => {
 		state.resetResponseText();
 		state.appendResponseText("second message");
 		expect(state.responseText).toBe("second message");
+	});
+});
+
+describe("SubagentState — classification predicates", () => {
+	const active = new Set<SubagentStatus>(["running", "queued"]);
+	const terminalError = new Set<SubagentStatus>(["error", "stopped", "aborted"]);
+	const running = new Set<SubagentStatus>(["running"]);
+
+	describe("exported status-level functions", () => {
+		for (const status of ALL_STATUSES) {
+			it(`isActiveStatus("${status}") is ${active.has(status)}`, () => {
+				expect(isActiveStatus(status)).toBe(active.has(status));
+			});
+			it(`isTerminalErrorStatus("${status}") is ${terminalError.has(status)}`, () => {
+				expect(isTerminalErrorStatus(status)).toBe(terminalError.has(status));
+			});
+			it(`isRunningStatus("${status}") is ${running.has(status)}`, () => {
+				expect(isRunningStatus(status)).toBe(running.has(status));
+			});
+		}
+	});
+
+	describe("instance predicates delegate to the status-level functions", () => {
+		for (const status of ALL_STATUSES) {
+			it(`"${status}": isActive=${active.has(status)}, isTerminalError=${terminalError.has(status)}, isRunning=${running.has(status)}, canBeSteered=${running.has(status)}`, () => {
+				const state = new SubagentState({ status });
+				expect(state.isActive()).toBe(active.has(status));
+				expect(state.isTerminalError()).toBe(terminalError.has(status));
+				expect(state.isRunning()).toBe(running.has(status));
+				expect(state.canBeSteered()).toBe(running.has(status));
+			});
+		}
 	});
 });

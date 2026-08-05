@@ -1,3 +1,5 @@
+import { lstatSync } from "node:fs";
+
 import type { PathFlavor } from "#src/path/path-flavor";
 
 import { AccessPath } from "./access-intent/access-path";
@@ -60,8 +62,8 @@ export class PathNormalizer {
   }
 
   /** Build a literal-only AccessPath (unknown base after a non-literal `cd`). */
-  forLiteral(literal: string, matchAliases?: readonly string[]): AccessPath {
-    return AccessPath.forLiteral(literal, matchAliases);
+  forLiteral(literal: string): AccessPath {
+    return AccessPath.forLiteral(literal);
   }
 
   /**
@@ -84,17 +86,14 @@ export class PathNormalizer {
         return AccessPath.forDevice(token);
       case "drive-mount":
         return this.forPath(shape.windowsPath, options);
-      case "posix-absolute": {
+      case "posix-absolute":
         // A non-mount POSIX absolute (`/tmp`, `/usr`) has an install-dependent
         // Windows target this package cannot know, so it is kept literal: always
         // external, matched and displayed as typed, never fabricated into
-        // `c:\tmp` (#533). The win32 path matcher folds a rule's separators
-        // (`/` -> `\`), so a forward-slash value is unmatchable; carry a
-        // backslash match alias so a natural `/tmp/*` external_directory rule
-        // still resolves, while `value()` stays as typed for display.
-        const literal = normalizePathPolicyLiteral(token);
-        return this.forLiteral(literal, [literal.replaceAll("/", "\\")]);
-      }
+        // `c:\tmp` (#533). The win32 path matcher folds separators on both the
+        // rule and the value (#653), so a natural `/tmp/*` rule matches the
+        // as-typed literal directly.
+        return this.forLiteral(normalizePathPolicyLiteral(token));
       case "plain":
         return this.forPath(token, options);
     }
@@ -202,5 +201,31 @@ export class PathNormalizer {
       this.cwd,
       this.flavor,
     );
+  }
+
+  /**
+   * True when `absolutePath` names an existing filesystem entry.
+   *
+   * The existence probe that resolves an *unknown* bash token: a bare word is a
+   * path candidate iff it names something real (ADR 0009, #645). Uses `lstat`,
+   * not `stat`, so a symlink counts as an entry even when its target is
+   * dangling — the link is the operand the command names, and dropping it would
+   * reopen the bypass this probe closes.
+   *
+   * Any error (ENOENT, ENOTDIR, EACCES, ELOOP) answers `false`: an entry the
+   * gate cannot confirm is not promoted, leaving the token exactly as
+   * unrestricted as it is today.
+   *
+   * Lives here beside {@link forPath}'s canonicalization so the package keeps a
+   * single filesystem edge for path interpretation.
+   */
+  entryExists(absolutePath: string): boolean {
+    if (!absolutePath) return false;
+    try {
+      lstatSync(absolutePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

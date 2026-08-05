@@ -239,3 +239,8 @@ If the promise was previously assigned or awaited, the `void` is a behavior chan
 
 `.forEach()` callback mutations of outer-scope `let` variables are invisible to TypeScript's control-flow narrowing outside the callback; `@typescript-eslint/no-unnecessary-condition` then flags a later `if (!flag)` check as "always truthy"/"always falsy" even though the flag does change at runtime.
 Fix: use a `for...of` loop instead of `.forEach()` when a callback mutates a variable a later conditional depends on.
+
+### Speculative eslint-disable directives
+
+Add an `eslint-disable` directive only after the linter reports the rule, never preemptively — the pre-commit auto-fix strips an unused directive and leaves a stray blank line (an inline disable above an object-literal property).
+A `||`-for-defaulting on a non-nullable primitive (e.g. `string`) does not trip `prefer-nullish-coalescing`, so no disable is needed (Refs #596).

@@ -85,7 +85,9 @@ The `permission` object uses deep-shallow merge; scalar fields use simple replac
 - `docs/architecture/architecture.md` inline-copies the core `rule.ts` types (`Rule`, `RuleOrigin`, `Ruleset`).
   Adding or removing a field on one of these must update that listing too — a module-move check misses it, and only the pre-completion reviewer catches it otherwise.
 - Config **files** are validated strictly against `unifiedConfigSchema` (`config-schema.ts`) and rejected **fail-closed** on any invalid field (empty scope → universal `ask`), with a clear per-issue message (Refs #547).
-  Per-agent frontmatter stays tolerant — `policy-loader.ts` extracts only its `permission` block via `normalizeFlatPermissionValue`, since frontmatter carries non-config keys.
+  A rejected **non-global** scope (project / agent / project-agent) additionally floors the composed policy `allow`→`ask` (origin `fail-closed`) at composition, so a lower scope's `allow` cannot be silently inherited behind an invalid higher scope; `deny` is preserved, global is excluded, and `yoloMode` re-permits the floored `ask` (Refs #646).
+  The loader marks such a scope `ScopeConfig.invalid` (a present-but-unloadable file; an absent file stays a plain empty scope); the manager reads the flags in `resolvePermissions` and appends a fail-closed notice to `getConfigIssues`.
+  Per-agent frontmatter stays tolerant — `policy-loader.ts` extracts only its `permission` block via `normalizeFlatPermissionValue`, since frontmatter carries non-config keys; only a whole-file read/parse failure of an existing agent file marks the scope invalid, not a tolerantly-dropped per-key entry.
 - When removing a config field, drop it from `unifiedConfigSchema`; configs that still set it are then rejected.
   For a soft-deprecation window, keep the field optional in the schema and ignore its value.
 - When adding an optional field to `PermissionSystemExtensionConfig`, do not include it in `DEFAULT_EXTENSION_CONFIG` with an explicit `undefined` value — tests use `deepEqual` and it breaks equality.
@@ -94,6 +96,16 @@ The `permission` object uses deep-shallow merge; scalar fields use simple replac
   A field on the runtime type but not the merge intermediate is silently dropped before runtime (the #332 / #347 bug class).
   After #356, omitting a field from `UnifiedPermissionConfig` that `normalizePermissionSystemConfig` reads is a **compile error** — `normalizePermissionSystemConfig` reads fields directly from the typed `UnifiedPermissionConfig` parameter, so `tsc` catches the gap immediately.
 - When a config example sets a policy for `write`, include the same policy for `edit` — both tools modify files and users expect them gated together.
+
+## Log writes
+
+Both JSONL logs are created owner-only (`0600`, in a `0700` directory) and key-name redacted; the permission-forwarding request/response files are mode-restricted too (but **not** redacted — the parent reads them to render the ask-prompt).
+Do not add a log write path that bypasses `writeLine` in `src/logging.ts`, and do not pass a `mode`-less `appendFileSync`/`writeFileSync`/`mkdirSync` for an artifact holding tool input.
+Redaction is **structural, never value-shape**: `isSensitiveLogKey` (`src/log-redaction.ts`) masks a value because of the key name it is bound to, and a provider-prefix/entropy list was measured against a real 6.7 MB log and declined (403 `sk-` hits, all false positives from `task-*`; zero true positives).
+The boundary to repeat verbatim in any doc or reply: a value bound to a sensitive key name is masked; a secret embedded in a bash command string is not.
+Redaction is applied at **two** points, and the second is not redundant — `getToolInputPreviewForLog` flattens tool input to a string before the writer sees it, so `serializeRedactedToolInputPreview` (`src/tool-input-preview.ts`) is the only place its keys still exist.
+Never redact `formatToolInputForPrompt`: the user must see the real input to decide.
+Governing record: `docs/decisions/0010-permission-log-secret-exposure.md` (Refs #647).
 
 ## Cross-Extension Integration
 
@@ -138,6 +150,13 @@ The `path` and `external_directory` gates are path-aware for **all** tools, not 
 The `ToolAccessExtractorRegistry` (`src/tool-access-extractor-registry.ts`) mirrors `ToolInputFormatterRegistry`: one instance created in `index.ts`, its lookup threaded into `ToolCallGatePipeline`, its registrar exposed cross-extension via `PermissionsService.registerToolAccessExtractor`.
 Extension/MCP path gating is default-on (no registration needed); per-tool path maps for extension tools (a custom extractor key that supplies the path via a registered `ToolAccessExtractor`) are a deferred follow-up.
 
+The live-authority layer is a Chain of Responsibility (ADR 0007, `docs/decisions/0007-model-judge-authorizer-chain-adr.md`): `composeAuthorizerChain(links, terminal, query)` (`src/authority/authorizer-chain.ts`) runs registered non-terminal `Authorizer` links (`allow | deny | defer`) ahead of the context-selected `TerminalAuthorizer` (which cannot defer).
+The `AuthorizerRegistry` (`src/authority/authorizer-registry.ts`) mirrors `ToolAccessExtractorRegistry`: one instance in `index.ts`, its lookup threaded into `AuthorizerSelection` and its registrar exposed cross-extension via `PermissionsService.registerAuthorizer(name, authorize)`.
+`AuthorizerSelection.escalate` resolves the `authorizerChain` config **per ask** (not at `activate`) so a link registered in a late `permissions:ready` handler is honored before the session's first ask (ADR 0007 §4); resolution is config-order, skips an unregistered name with a logged `authorizer_chain_unregistered_link` review event (fail-safe), and wraps each link in the bounded-delegation envelope (`src/authority/delegation-envelope.ts`) so an `allow` on an excluded surface (`external_directory` / `path`) is capped to `defer`.
+The envelope excludes on the **gate** surface (`details.accessIntent.surface`), falling back to the display surface only when no facts are present, so a forwarded ask must carry the child-fixed facts or it is judged on the child's tool name and escapes the exclusion — `buildForwardedAskDetails` (`src/authority/forwarded-request-server.ts`) therefore projects `surface`/`matchValues`/`boundaryValue` off the request, and only those three: `requesterCwd`/`principal` stay off the ask details (Refs #635).
+Each link is handed a narrow, session-scoped `PermissionQuery` (`Pick`-style projection of `PermissionsService`: `checkPermission` / `getToolPermission`) so it queries the engine at gate parity rather than reaching for the service via `Symbol.for()`.
+The secret-shaped-`path` refinement of the checkpoint and the allow-capable opaque-bash adjudicator that consumes the query are deferred to #620.
+
 ## Testing
 
 Shared test fixtures live in `test/helpers/`:
@@ -170,6 +189,8 @@ This resolver-internal boundary is a deliberate, formalized seam, not transition
 - Test system-prompt sanitization (denied tool lines narrowed out of the `Available tools:` listing, allowed tools preserved).
 - Test the external-directory guard for path-bearing file tools, including extension and MCP tools (default-on path gating, #352).
 - Test config loading, validation issues, and tolerance of deprecated keys.
+- When a change reads a **new** `ExtensionContext` field/method (e.g. `ctx.isProjectTrusted()`), update `makeCtx` **and** grep every hand-built ctx literal — `grep -rln "hasUI:" test/` (18 files cast `as unknown as ExtensionContext` / `as never`).
+  These casts bypass `tsc`, so a missing field fails only at the full-suite run, not `check` or the cycle-scoped file (#644: `permission-events.test.ts` surfaced `ctx.isProjectTrusted is not a function` at runtime).
 - To test the file-based permission-forwarding round-trip (a subagent's `ask` reaching the parent), do not `await` the child's `pi.fire("tool_call", …)` directly — `ParentAuthorizer.authorize` (`src/authority/approval-escalator.ts`) polls for a response with a 10-minute timeout when forwarding to the parent.
   Instead: fire without awaiting, poll the parent's `requests/` dir (`createPermissionForwardingLocation(forwardingDir, parentSessionId)`) for the child's request file, write an approval JSON to `responses/<id>.json`, then await the fire.
   See the `subagent registry sharing` test in `test/composition-root.test.ts`.
@@ -219,8 +240,11 @@ Platform facts verified against Pi core source during #533 planning:
   On POSIX `\` is a legal filename character, so the token stays bare there.
 - The bash-token interpretation layer implementing these semantics (exact `/dev/*` devices preserved, `/c/` mounts translated, other POSIX absolutes literal-only external) shipped in #533: `PathNormalizer.forBashToken`/`interpretBashCdTarget`/`isBoundaryOutsideWorkingDirectory` branch on the shape returned by the pure `access-intent/bash/msys-bash-tokens.ts` classifier, and `BashPathResolver` routes every bash token (both the `external_directory` and `path` surfaces) through `forBashToken`.
   See `docs/decisions/0003-git-bash-posix-path-semantics.md`.
-- A win32 non-mount POSIX absolute (`/tmp/foo`) is a literal-only `AccessPath` whose `value()` (display) stays as typed but whose `matchValues()` carries a backslash alias (`\tmp\foo`) — the win32 path matcher folds a rule's separators (`/` → `\`, see `pathMatchOptions` in `rule.ts`), so a forward-slash value is otherwise unmatchable and a `/tmp/*` allow rule would never suppress the prompt.
-  When adding another literal-only path shape on win32, give it a backslash match alias or it cannot be allow-listed.
+- A win32 non-mount POSIX absolute (`/tmp/foo`) is a literal-only `AccessPath` matched and displayed exactly as typed, and a `/tmp/*` allow rule suppresses its prompt.
+  This works because the win32 path fold (`pathMatchOptions` in `rule.ts` → `PathFlavor.matchOptions`) normalizes separators on **both** the rule pattern and the matched value.
+  Folding only the pattern — the pre-#653 behavior — made every forward-slash match value unmatchable, silently voiding a rule like `path: {"/dev/null": "allow"}` on Windows.
+  Keep the fold symmetric: matching goes through `CompiledWildcardPattern.matches(value)`, which owns both halves, and the compiled pattern exposes no raw `RegExp` a caller could `.test()` with an unfolded value.
+  A win32 path shape therefore needs no hand-built backslash match alias (#533's was removed in #653).
 
 ## Notes for Agents
 
@@ -247,13 +271,19 @@ The broader classifier also recognizes the backslash drive form (`D:\…`) — t
 On win32 the broad classifier additionally recognizes a backslash-relative token (`dir\file`, no leading `.`, no `/`, no `..`, not a drive-letter absolute) as a `path`-surface candidate — gated the same as its forward-slash equivalent `dir/file` ([#520]) — while on POSIX `\` is a legal filename character so the token stays bare; the decision is `PathFlavor.hasPathSeparator`, which the win32 flavor answers by counting `\`, so the classifier never reads `process.platform`.
 On POSIX, a drive-shaped token (`C:/foo`) resolves as the real in-CWD path `./C:/foo` and remains gated by the `path` surface; the `PathNormalizer`'s `isAbsolute` decides platform-correct routing.
 Once a token passes classification, its resolution is platform-aware on win32: `PathNormalizer.forBashToken` applies Git Bash/MSYS semantics (safe `/dev/*` devices preserved, `/c/…` drive mounts translated to `C:\…`, other POSIX absolutes kept literal-only) before building the `AccessPath`, so a plan must not assume a leading-`/` win32 bash token resolves with `node:path.win32` rules (#533; see the Windows and Git Bash section).
-A bare filename (`cat id_rsa`), which has none of the broad classifier's accepted shapes, is nonetheless promoted into the `path` surface when it matches an active, specific (non-`*`) `path` deny/ask rule ([#509]) — rule-driven promotion via `classifyPromotedRuleCandidate`, decided by `PermissionManager.getPromotablePathTokenMatcher` (owns the ruleset filter and the Windows case/separator fold) and threaded into `BashPathResolver` as an injected predicate.
-A bare token that matches no specific `path` rule, or any config without `path` rules at all, is still dropped exactly as before — promotion never fires against the universal `"*"` fallback.
+A bare filename (`cat id_rsa`, `cat outside-link`), which has none of the broad classifier's accepted shapes, is promoted into **both** path projections when it names an existing filesystem entry — the existence probe (`BashPathResolver.probeBareToken` → `PathNormalizer.entryExists`, lstat) that replaced [#509]'s rule-driven promotion in [#645].
+Candidacy comes from the filesystem and the decision from explicit rules or the cwd boundary, so no classifier consults the ruleset; `docs/decisions/0009-bash-path-projection-completeness-contract.md` is the governing record.
+Because a promoted token flows through the ordinary `AccessPath` canonicalization, a symlink is matched by rules naming its **target** — the case raw-token matching could never see — and one resolving outside the tree reaches `external_directory` exactly like `cat /tmp/x`.
+A bare token naming nothing is dropped (`git status` never prompts, even under `path: {"*": "deny"}`), and a promoted token matching no explicit rule stays unrestricted via the `matchedPattern === undefined` guard, so promotion cannot turn the universal fallback into a prompt firehose.
+The probe requires a **known** effective base, so a bare token after a non-literal `cd` stays unpromoted ([#393] conservatism).
+An `--opt=value` token additionally has its value emitted as its own token at collection (`collectEmbeddedOptionValues`), so `grep --file=/tmp/patterns` gates the embedded path while `--format=json` yields a bare `json` that names nothing ([#645]).
 When a plan or test asserts a specific bash repro string, trace the token through the classifier first — an issue's headline repro can describe a symptom whose literal input never reaches the gate being changed.
 
 [#261]: https://github.com/gotgenes/pi-packages/issues/261
 [#296]: https://github.com/gotgenes/pi-packages/issues/296
+[#393]: https://github.com/gotgenes/pi-packages/issues/393
 [#509]: https://github.com/gotgenes/pi-packages/issues/509
+[#645]: https://github.com/gotgenes/pi-packages/issues/645
 [#520]: https://github.com/gotgenes/pi-packages/issues/520
 [earendil-works/pi#4731]: https://github.com/earendil-works/pi/issues/4731
 [ADR-0002]: https://github.com/gotgenes/pi-packages/blob/main/packages/pi-subagents/docs/decisions/0002-extensions-on-a-minimal-core.md

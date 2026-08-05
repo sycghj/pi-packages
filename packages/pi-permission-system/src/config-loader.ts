@@ -9,6 +9,9 @@ import {
   getProjectConfigPath,
 } from "./config-paths";
 import {
+  type AutoModeConfig,
+  type LearningConfig,
+  type RiskOverrideConfig,
   type ShellToolsConfig,
   type UnifiedPermissionConfig,
   unifiedConfigSchema,
@@ -21,7 +24,13 @@ import { isDenyWithReason, isPermissionState } from "./types";
 // the single source of truth) and re-exported so existing importers keep their
 // import path. All fields are optional so partial configs merge before
 // defaults are applied downstream.
-export type { ShellToolsConfig, UnifiedPermissionConfig };
+export type {
+  AutoModeConfig,
+  LearningConfig,
+  RiskOverrideConfig,
+  ShellToolsConfig,
+  UnifiedPermissionConfig,
+};
 
 export interface UnifiedConfigLoadResult {
   config: UnifiedPermissionConfig;
@@ -194,12 +203,12 @@ function formatConfigIssues(error: ZodError): string[] {
  * - `permission` is deep-shallow merged (surface-level object maps are shallow-merged).
  * - Scalar fields (debugLog, permissionReviewLog, yoloMode) are replaced when
  *   present in the override.
+ * - Runtime object fields (autoMode) are replaced when present in the override.
  * - Array fields (piInfrastructureReadPaths) replace the base when present in
  *   the override (override-wins, same as scalars).
  */
-// Scalar knobs merged by override-replaces-base; keep in sync with
-// PermissionSystemExtensionConfig booleans (debugLog, permissionReviewLog,
-// yoloMode, doublePressToConfirm).
+// Runtime object knobs are override-replaces-base; keep in sync with
+// PermissionSystemExtensionConfig object fields (autoMode).
 export function mergeUnifiedConfigs(
   base: UnifiedPermissionConfig,
   override: UnifiedPermissionConfig,
@@ -230,11 +239,27 @@ export function mergeUnifiedConfigs(
     }
   }
 
+  const autoMode = override.autoMode ?? base.autoMode;
+  if (autoMode !== undefined) {
+    merged.autoMode = autoMode;
+  }
+
+  const learning = override.learning ?? base.learning;
+  if (learning !== undefined) {
+    merged.learning = learning;
+  }
+
+  const riskOverrides = override.riskOverrides ?? base.riskOverrides;
+  if (riskOverrides !== undefined) {
+    merged.riskOverrides = riskOverrides;
+  }
+
   // Array fields: override replaces base when defined
-  const piInfrastructureReadPaths =
-    override.piInfrastructureReadPaths ?? base.piInfrastructureReadPaths;
-  if (piInfrastructureReadPaths !== undefined) {
-    merged.piInfrastructureReadPaths = piInfrastructureReadPaths;
+  for (const key of ["piInfrastructureReadPaths", "authorizerChain"] as const) {
+    const value = override[key] ?? base[key];
+    if (value !== undefined) {
+      merged[key] = value;
+    }
   }
 
   // shellTools: shallow-merge by tool name so a project entry overrides a
@@ -285,12 +310,20 @@ export interface MergedConfigResult {
  * Legacy files are detected and warned about. Their content is parsed with the
  * flat-format parser — legacy-format keys (defaultPolicy, tools, bash, etc.)
  * are not translated and contribute no permission rules.
+ *
+ * When `options.includeProjectScope` is `false`, the project-scope steps (4 and
+ * 5) are skipped entirely — neither the legacy project policy nor the new
+ * project config is read or merged. This gates project-local config on project
+ * trust: an untrusted repository cannot loosen the operator's global policy
+ * (#644). It defaults to `true`, preserving the trusted / caller-agnostic path.
  */
 export function loadAndMergeConfigs(
   agentDir: string,
   cwd: string,
   extensionRoot: string,
+  options: { includeProjectScope?: boolean } = {},
 ): MergedConfigResult {
+  const includeProjectScope = options.includeProjectScope !== false;
   const allIssues: string[] = [];
 
   const newGlobalPath = getGlobalConfigPath(agentDir);
@@ -338,8 +371,8 @@ export function loadAndMergeConfigs(
   const globalConfig = globalResult.config;
   merged = mergeUnifiedConfigs(merged, globalConfig);
 
-  // 4. Legacy project policy
-  if (existsSync(legacyProjectPolicyPath)) {
+  // 4. Legacy project policy — skipped when the project scope is withheld.
+  if (includeProjectScope && existsSync(legacyProjectPolicyPath)) {
     const legacy = loadUnifiedConfig(legacyProjectPolicyPath);
     allIssues.push(
       `Legacy project policy found at '${legacyProjectPolicyPath}'. ` +
@@ -350,8 +383,11 @@ export function loadAndMergeConfigs(
     merged = mergeUnifiedConfigs(merged, legacy.config);
   }
 
-  // 5. New project config
-  const projectResult = loadUnifiedConfig(newProjectPath);
+  // 5. New project config — skipped when the project scope is withheld, so an
+  // untrusted project contributes nothing and `project` reports empty.
+  const projectResult = includeProjectScope
+    ? loadUnifiedConfig(newProjectPath)
+    : { config: {}, issues: [] };
   allIssues.push(...projectResult.issues);
   const projectConfig = projectResult.config;
   merged = mergeUnifiedConfigs(merged, projectConfig);

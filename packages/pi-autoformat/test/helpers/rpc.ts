@@ -16,6 +16,41 @@ import { resolve } from "node:path";
 export const PI_BIN = resolve("node_modules/.bin/pi");
 export const piAvailable = existsSync(PI_BIN);
 
+const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+const RPC_VITEST_TIMEOUT_MARGIN_MS = 5_000;
+
+/**
+ * Harness timeout (in ms) for a real-`pi` RPC spawn. Reads
+ * `PI_AUTOFORMAT_RPC_TIMEOUT_MS` from the given environment; any unset,
+ * non-numeric, non-integer, zero, or negative value falls back to the
+ * raised default. Accepting `env` as a parameter (rather than reading
+ * `process.env` directly) keeps this pure and unit-testable.
+ */
+export function resolveRpcTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.PI_AUTOFORMAT_RPC_TIMEOUT_MS;
+  if (raw !== undefined && /^\d+$/.test(raw)) {
+    const parsed = Number.parseInt(raw, 10);
+    if (parsed > 0) {
+      return parsed;
+    }
+  }
+  return DEFAULT_RPC_TIMEOUT_MS;
+}
+
+/**
+ * Vitest per-test budget (in ms) for an acceptance case that spawns the
+ * real `pi` CLI: always the resolved harness timeout plus a fixed
+ * margin, so the harness's descriptive timeout error (with captured
+ * stdout/stderr) surfaces before Vitest kills the test.
+ */
+export function rpcVitestTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return resolveRpcTimeoutMs(env) + RPC_VITEST_TIMEOUT_MARGIN_MS;
+}
+
 export type RpcResponse = {
   id?: string;
   type: string;
@@ -63,7 +98,7 @@ export async function runRpcSession(
     cwd,
     commands,
     extraExtensions = [],
-    timeoutMs = 10_000,
+    timeoutMs = resolveRpcTimeoutMs(),
     env,
     productionExtension = DEFAULT_PRODUCTION_EXTENSION,
   } = options;

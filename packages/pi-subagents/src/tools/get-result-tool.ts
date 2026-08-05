@@ -12,43 +12,39 @@ export interface GetResultToolManager {
 	getRecord(id: string): Subagent | undefined;
 }
 
-export interface GetResultToolNotifications {
-	consume(id: string): void;
-}
-
 // ---- Class ----
 
 export class GetResultTool {
 	constructor(
 		private readonly manager: GetResultToolManager,
-		private readonly notifications: GetResultToolNotifications,
 		private readonly registry: AgentConfigLookup,
 	) {}
 
 	async execute(
 		_toolCallId: string,
 		params: { agent_id: string; wait?: boolean; verbose?: boolean },
-		_signal: AbortSignal,
+		signal: AbortSignal,
 		_onUpdate: unknown,
 		_ctx: unknown,
 	) {
 		const record = this.manager.getRecord(params.agent_id);
 		if (!record) {
-			return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
+			return textResult(`Agent not found: "${params.agent_id}". Records are cleared at session start/switch, so it may be from a previous session.`);
 		}
 
-		// Wait for completion if requested.
-		// Consume BEFORE awaiting: onComplete fires inside .then() (attached
-		// earlier at spawn time) and always runs before this await resumes.
-		// Consuming here prevents a redundant follow-up notification.
-		if (params.wait && record.status === "running" && record.promise) {
-			this.notifications.consume(params.agent_id);
-			await record.promise;
+		// Wait for completion if requested. The record owns the decision of whether
+		// it is still awaitable — a queued agent counts, because scheduleVia()
+		// captures its limiter promise at spawn. A parent interrupt ends the wait
+		// without cancelling the agent, leaving the outcome uncollected below.
+		if (params.wait) {
+			await record.waitUntilSettled(signal);
 		}
 
-		// Consume the settled result — suppresses the completion notification.
-		if (record.status !== "running" && record.status !== "queued") {
-			this.notifications.consume(params.agent_id);
+		// Pull-delivery edge: the parent is collecting the settled outcome here, so
+		// mark it consumed. The completion nudge scheduled by onSubagentCompleted
+		// re-reads record.consumed at fire time and suppresses itself.
+		if (!record.isActive()) {
+			record.markConsumed();
 		}
 
 		return textResult(formatAgentReport(this.buildReport(record, params.verbose)));
@@ -67,7 +63,11 @@ export class GetResultTool {
 			description: record.description,
 			result: record.result,
 			error: record.error,
+			stoppedWhileQueued: record.stoppedWhileQueued,
 			conversation: verbose ? record.getConversation() : undefined,
+			// Transcript pointer: lets the parent read the full session from disk,
+			// and covers verbose after the live session was released (no conversation).
+			transcriptPath: record.outputFile,
 		};
 	}
 

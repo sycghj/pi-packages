@@ -6,6 +6,7 @@ import {
   evaluateAnyValue,
   evaluateFirst,
   evaluateMostRestrictive,
+  floorAllowsToAsk,
   rewriteAsksToYolo,
 } from "#src/rule";
 
@@ -414,6 +415,49 @@ describe("evaluate", () => {
     expect(result.action).toBe("allow");
   });
 
+  test("win32: a forward-slash path pattern matches a forward-slash value (#653)", () => {
+    // A Git Bash device token reaches the `path` surface spelled as typed, so
+    // the fold has to normalize the value as well as the rule pattern.
+    const askAll: Rule = {
+      surface: "path",
+      pattern: "*",
+      action: "ask",
+      layer: "config",
+      origin: "global",
+    };
+    const allowDevice: Rule = {
+      surface: "path",
+      pattern: "/dev/null",
+      action: "allow",
+      layer: "config",
+      origin: "global",
+    };
+    const result = evaluate(
+      "path",
+      "/dev/null",
+      [askAll, allowDevice],
+      win32PathFlavor,
+    );
+    expect(result.action).toBe("allow");
+  });
+
+  test("win32: bash surface keeps its separators unfolded (not a path surface)", () => {
+    const result = evaluate(
+      "bash",
+      "cat \\tmp\\x",
+      [
+        {
+          surface: "bash",
+          pattern: "cat /tmp/x",
+          action: "allow",
+          origin: "global",
+        },
+      ],
+      win32PathFlavor,
+    );
+    expect(result.action).toBe("ask");
+  });
+
   test("win32: bash surface stays case-sensitive (not a path surface)", () => {
     const result = evaluate(
       "bash",
@@ -697,38 +741,40 @@ describe("evaluateMostRestrictive", () => {
   });
 });
 
-describe("rewriteAsksToYolo", () => {
-  const askBash: Rule = {
-    surface: "bash",
-    pattern: "*",
-    action: "ask",
-    layer: "config",
-    origin: "global",
-  };
-  const denyEnv: Rule = {
-    surface: "path",
-    pattern: ".env",
-    action: "deny",
-    layer: "config",
-    origin: "project",
-  };
-  const allowRead: Rule = {
-    surface: "read",
-    pattern: "*",
-    action: "allow",
-    layer: "config",
-    origin: "agent",
-  };
-  const askDefault: Rule = {
-    surface: "*",
-    pattern: "*",
-    action: "ask",
-    layer: "default",
-    origin: "builtin",
-  };
+// Shared Rule fixtures for the composition-stage overlay blocks
+// (rewriteAsksToYolo and floorAllowsToAsk), which mirror each other.
+const overlayAskBash: Rule = {
+  surface: "bash",
+  pattern: "*",
+  action: "ask",
+  layer: "config",
+  origin: "global",
+};
+const overlayDenyEnv: Rule = {
+  surface: "path",
+  pattern: ".env",
+  action: "deny",
+  layer: "config",
+  origin: "project",
+};
+const overlayAllowRead: Rule = {
+  surface: "read",
+  pattern: "*",
+  action: "allow",
+  layer: "config",
+  origin: "agent",
+};
+const overlayAskDefault: Rule = {
+  surface: "*",
+  pattern: "*",
+  action: "ask",
+  layer: "default",
+  origin: "builtin",
+};
 
+describe("rewriteAsksToYolo", () => {
   test("rewrites an ask rule to allow tagged origin 'yolo'", () => {
-    const result = rewriteAsksToYolo([askBash]);
+    const result = rewriteAsksToYolo([overlayAskBash]);
     expect(result).toEqual([
       {
         surface: "bash",
@@ -741,7 +787,7 @@ describe("rewriteAsksToYolo", () => {
   });
 
   test("preserves surface, pattern, and layer while flipping ask", () => {
-    const [rewritten] = rewriteAsksToYolo([askBash]);
+    const [rewritten] = rewriteAsksToYolo([overlayAskBash]);
     expect(rewritten.surface).toBe("bash");
     expect(rewritten.pattern).toBe("*");
     expect(rewritten.layer).toBe("config");
@@ -750,24 +796,29 @@ describe("rewriteAsksToYolo", () => {
   });
 
   test("rewrites the synthesized universal default ask rule", () => {
-    const result = rewriteAsksToYolo([askDefault]);
+    const result = rewriteAsksToYolo([overlayAskDefault]);
     expect(result[0]?.action).toBe("allow");
     expect(result[0]?.origin).toBe("yolo");
     expect(result[0]?.layer).toBe("default");
   });
 
   test("passes deny rules through untouched (preserves hard denies)", () => {
-    const result = rewriteAsksToYolo([denyEnv]);
-    expect(result).toEqual([denyEnv]);
+    const result = rewriteAsksToYolo([overlayDenyEnv]);
+    expect(result).toEqual([overlayDenyEnv]);
   });
 
   test("passes allow rules through untouched", () => {
-    const result = rewriteAsksToYolo([allowRead]);
-    expect(result).toEqual([allowRead]);
+    const result = rewriteAsksToYolo([overlayAllowRead]);
+    expect(result).toEqual([overlayAllowRead]);
   });
 
   test("rewrites only ask rules in a mixed ruleset, preserving order", () => {
-    const ruleset: Ruleset = [askDefault, allowRead, askBash, denyEnv];
+    const ruleset: Ruleset = [
+      overlayAskDefault,
+      overlayAllowRead,
+      overlayAskBash,
+      overlayDenyEnv,
+    ];
     const result = rewriteAsksToYolo(ruleset);
     expect(result.map((r) => r.action)).toEqual([
       "allow",
@@ -784,7 +835,7 @@ describe("rewriteAsksToYolo", () => {
   });
 
   test("does not mutate the input ruleset", () => {
-    const ruleset: Ruleset = [askBash];
+    const ruleset: Ruleset = [overlayAskBash];
     rewriteAsksToYolo(ruleset);
     expect(ruleset[0]?.action).toBe("ask");
     expect(ruleset[0]?.origin).toBe("global");
@@ -793,5 +844,68 @@ describe("rewriteAsksToYolo", () => {
   test("'yolo' is a valid RuleOrigin", () => {
     const origin: RuleOrigin = "yolo";
     expect(origin).toBe("yolo");
+  });
+});
+
+describe("floorAllowsToAsk", () => {
+  test("floors an allow rule to ask tagged origin 'fail-closed'", () => {
+    const result = floorAllowsToAsk([overlayAllowRead]);
+    expect(result).toEqual([
+      {
+        surface: "read",
+        pattern: "*",
+        action: "ask",
+        layer: "config",
+        origin: "fail-closed",
+      },
+    ]);
+  });
+
+  test("preserves surface, pattern, and layer while flooring allow", () => {
+    const [floored] = floorAllowsToAsk([overlayAllowRead]);
+    expect(floored.surface).toBe("read");
+    expect(floored.pattern).toBe("*");
+    expect(floored.layer).toBe("config");
+    expect(floored.action).toBe("ask");
+    expect(floored.origin).toBe("fail-closed");
+  });
+
+  test("passes deny rules through untouched (preserves hard denies)", () => {
+    const result = floorAllowsToAsk([overlayDenyEnv]);
+    expect(result).toEqual([overlayDenyEnv]);
+  });
+
+  test("passes ask rules through untouched", () => {
+    const result = floorAllowsToAsk([overlayAskBash]);
+    expect(result).toEqual([overlayAskBash]);
+  });
+
+  test("floors only allow rules in a mixed ruleset, preserving order", () => {
+    const ruleset: Ruleset = [
+      overlayAskDefault,
+      overlayAllowRead,
+      overlayAskBash,
+      overlayDenyEnv,
+    ];
+    const result = floorAllowsToAsk(ruleset);
+    expect(result.map((r) => r.action)).toEqual(["ask", "ask", "ask", "deny"]);
+    expect(result.map((r) => r.origin)).toEqual([
+      "builtin",
+      "fail-closed",
+      "global",
+      "project",
+    ]);
+  });
+
+  test("does not mutate the input ruleset", () => {
+    const ruleset: Ruleset = [overlayAllowRead];
+    floorAllowsToAsk(ruleset);
+    expect(ruleset[0]?.action).toBe("allow");
+    expect(ruleset[0]?.origin).toBe("agent");
+  });
+
+  test("'fail-closed' is a valid RuleOrigin", () => {
+    const origin: RuleOrigin = "fail-closed";
+    expect(origin).toBe("fail-closed");
   });
 });

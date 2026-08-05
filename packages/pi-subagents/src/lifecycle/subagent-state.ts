@@ -30,12 +30,44 @@ export type SubagentStatus =
 	| "stopped"
 	| "error";
 
+// ---- Status classification predicates ----
+// The single decision point for the re-derived status groupings. Instance
+// methods on SubagentState delegate here; DTO consumers holding a bare
+// SubagentStatus (no SubagentState instance) call these directly.
+
+/** Running or queued — the agent is still live (started or awaiting a slot). */
+export function isActiveStatus(status: SubagentStatus): boolean {
+	return status === "running" || status === "queued";
+}
+
+/** Terminated by error, abort, or external stop (excludes the successful `steered`). */
+export function isTerminalErrorStatus(status: SubagentStatus): boolean {
+	return status === "error" || status === "stopped" || status === "aborted";
+}
+
+/** Actively running (excludes queued). */
+export function isRunningStatus(status: SubagentStatus): boolean {
+	return status === "running";
+}
+
 export interface SubagentStateInit {
 	status?: SubagentStatus;
 	result?: string;
 	error?: string;
+	/** Whether the agent was stopped before the limiter ever admitted it. */
+	stoppedWhileQueued?: boolean;
 	startedAt?: number;
 	completedAt?: number;
+	/** Time the parent collected the outcome; undefined = obligation still open. */
+	consumedAt?: number;
+	// Stats — seed a populated value without replaying the accumulation methods
+	toolUses?: number;
+	lifetimeUsage?: LifetimeUsage;
+	compactionCount?: number;
+	// Live activity — activeTools is seeded by name (each entry calls addActiveTool)
+	turnCount?: number;
+	activeTools?: string[];
+	responseText?: string;
 }
 
 export class SubagentState {
@@ -49,24 +81,34 @@ export class SubagentState {
 	private _error?: string;
 	get error(): string | undefined { return this._error; }
 
+	// Never-started marker — a queued agent stopped before its slot opened has no
+	// result, as distinct from a started agent that produced none.
+	private _stoppedWhileQueued: boolean;
+	get stoppedWhileQueued(): boolean { return this._stoppedWhileQueued; }
+
 	private _startedAt: number;
 	get startedAt(): number { return this._startedAt; }
 
 	private _completedAt?: number;
 	get completedAt(): number | undefined { return this._completedAt; }
 
+	// Result delivery — whether the parent has collected the outcome (orthogonal to status)
+	private _consumedAt?: number;
+	get consumedAt(): number | undefined { return this._consumedAt; }
+	get consumed(): boolean { return this._consumedAt != null; }
+
 	// Stats — accumulated via mutation methods, readable via getters
-	private _toolUses = 0;
+	private _toolUses: number;
 	get toolUses(): number { return this._toolUses; }
 
-	private _lifetimeUsage: LifetimeUsage = { input: 0, output: 0, cacheWrite: 0 };
+	private _lifetimeUsage: LifetimeUsage;
 	get lifetimeUsage(): Readonly<LifetimeUsage> { return this._lifetimeUsage; }
 
-	private _compactionCount = 0;
+	private _compactionCount: number;
 	get compactionCount(): number { return this._compactionCount; }
 
 	// Live activity — accumulated via transition methods, readable via getters
-	private _turnCount = 1;
+	private _turnCount: number;
 	get turnCount(): number { return this._turnCount; }
 
 	private _activeTools = new Map<string, string>();
@@ -74,15 +116,48 @@ export class SubagentState {
 
 	private _toolKeySeq = 0;
 
-	private _responseText = "";
+	private _responseText: string;
 	get responseText(): string { return this._responseText; }
 
 	constructor(init: SubagentStateInit = {}) {
 		this._status = init.status ?? "queued";
 		this._result = init.result;
 		this._error = init.error;
+		this._stoppedWhileQueued = init.stoppedWhileQueued ?? false;
 		this._startedAt = init.startedAt ?? Date.now();
 		this._completedAt = init.completedAt;
+		this._consumedAt = init.consumedAt;
+		this._toolUses = init.toolUses ?? 0;
+		// Copy so a later addUsage() cannot mutate the caller's object.
+		this._lifetimeUsage = init.lifetimeUsage
+			? { ...init.lifetimeUsage }
+			: { input: 0, output: 0, cacheWrite: 0 };
+		this._compactionCount = init.compactionCount ?? 0;
+		this._turnCount = init.turnCount ?? 1;
+		this._responseText = init.responseText ?? "";
+		for (const name of init.activeTools ?? []) {
+			this.addActiveTool(name);
+		}
+	}
+
+	/** Running or queued — still live. */
+	isActive(): boolean {
+		return isActiveStatus(this._status);
+	}
+
+	/** Terminated by error, abort, or external stop (excludes `steered`). */
+	isTerminalError(): boolean {
+		return isTerminalErrorStatus(this._status);
+	}
+
+	/** Actively running (excludes queued). */
+	isRunning(): boolean {
+		return isRunningStatus(this._status);
+	}
+
+	/** Whether a steer message can be delivered — the agent must be running. */
+	canBeSteered(): boolean {
+		return isRunningStatus(this._status);
 	}
 
 	/** Increment tool use count. Called by record-observer on tool_execution_end. */
@@ -184,18 +259,37 @@ export class SubagentState {
 		}
 	}
 
+	/**
+	 * Record the parent collected the outcome. Idempotent — keeps the first
+	 * collection time (??=), so a re-read does not advance the retention clock.
+	 */
+	markConsumed(at?: number): void {
+		this._consumedAt ??= at ?? Date.now();
+	}
+
 	/** Transition to stopped state. Always valid — no guard. */
 	markStopped(completedAt?: number): void {
 		this._status = "stopped";
 		this._completedAt = completedAt ?? Date.now();
 	}
 
-	/** Reset for resume: running status, new startedAt, clear completedAt/result/error. */
+	/**
+	 * Stop an agent that is still awaiting a concurrency slot. Records the
+	 * never-started fact only when the agent is genuinely still queued, so a
+	 * mis-targeted call cannot claim it.
+	 */
+	stopQueued(completedAt?: number): void {
+		if (this._status === "queued") this._stoppedWhileQueued = true;
+		this.markStopped(completedAt);
+	}
+
+	/** Reset for resume: running status, new startedAt, clear completedAt/result/error/consumedAt. */
 	resetForResume(startedAt: number): void {
 		this._status = "running";
 		this._startedAt = startedAt;
 		this._completedAt = undefined;
 		this._result = undefined;
 		this._error = undefined;
+		this._consumedAt = undefined;
 	}
 }

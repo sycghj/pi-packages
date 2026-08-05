@@ -128,6 +128,9 @@ pnpm test
 pnpm run lint
 ```
 
+`pnpm test` runs the fast `unit` project.
+The acceptance tests that spawn the real `pi` CLI live in a separate `acceptance` project, run with `pnpm run test:acceptance` (or `pnpm run test:all` for both), so they never contend with the other packages' test processes in a workspace-wide run.
+
 See [`docs/testing.md`](docs/testing.md) for the layout of unit, acceptance, and (future) LLM-gated test suites, and how the acceptance harness resolves the `pi` binary from `node_modules/.bin/pi`.
 
 ## License

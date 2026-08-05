@@ -5,6 +5,193 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [24.1.0] — sycghj fork n-day release (2026-07-29)
+
+> **Fork notice:** `@sycghj/pi-permission-system` 24.1.0 is a fork of `gotgenes/pi-packages` `upstream/main` @ 24.0.0 rebased with the ask-branch `autoMode` feature (`fbdcbc1`). It is published under the `@sycghj` scope on the `sycghj/pi-packages` GitHub fork. npm publication is deferred (no npm account yet). See `docs/RELEASE_STATUS.md` for the full slice boundary, path-handling resolution, and pre-existing Windows test gaps.
+
+### Added (fork-only, not in upstream gotgenes)
+
+- **ask-branch `autoMode`** — optional LLM classifier that resolves `ask` decisions before the UI prompt. Deterministic `allow`/`deny` bypass the classifier entirely. Default `enabled: false`; `fallback: "ask"`. No hardcoded safe-tool allowlist.
+- **`autoMode.twoStage`** — optional thinking-review second stage on deny/malformed first-stage output. Default `enabled: false` (opt-in only).
+- **Worktree portable-path forwarding** (`ForwardedPortablePath`) + same-repo worktree `external_directory` suppression via git common-dir detection.
+- **Observability** — `auto_mode.*` and `learning.*` review-log events (no secrets / full transcript dump).
+- **Offline eval** — golden corpus (~100 cases) + `auto-mode-eval` with injected fake classifier.
+- **Path-handling fixes** — separator-preserving `expandHomePath` and `pi-infrastructure-read` flavor routing (fixes `PathFlavor` injection violations present in upstream on Windows).
+
+### Kept (default-off, not marketed)
+
+- **Learning / capability grants** (`src/learning/**`, `learning` + `riskOverrides` config) — kept as dead code (default `enabled: false`, `mode: "shadow"`). Learning modules are shared infrastructure for worktree/tool-call-gate-pipeline; physically excluding them is a high-risk refactor. Runtime `learningEnabled` guards all paths.
+
+### Compatibility
+
+- `Symbol.for("@gotgenes/pi-permission-system:...")` process-global keys are **kept** for interop with upstream-compatible extensions that look up the permissions service.
+- `authorizerChain` (upstream 24.0.0) and `autoMode` coexist; both are opt-in and default off.
+
+### Known gaps (not introduced by this fork)
+
+- 17 Windows-environment test failures inherited from upstream (upstream CI is Linux-only). Categories: chmod owner-only (9), bash/program symlink + case-folding (5), permission-manager real-home (3). See `docs/RELEASE_STATUS.md`.
+
+## [24.0.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v23.0.3...pi-permission-system-v24.0.0) (2026-07-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pi-permission-system:** an authorizer chain link's `allow` on a forwarded subagent ask raised by the `path` or `external_directory` gate is now downgraded to `defer`, so the request falls through to an interactive prompt. This affects only an operator running an allow-capable third-party link named in `authorizerChain`; the first-party model judge is deny-first and is unaffected, as are forwarded `bash` asks and per-tool-gated asks. See packages/pi-permission-system/docs/migration/0635-forwarded-ask-delegation-envelope.md
+
+### Bug Fixes
+
+* **pi-permission-system:** carry forwarded access facts to the Authorizer Chain ([#635](https://github.com/gotgenes/pi-packages/issues/635)) ([c0790ad](https://github.com/gotgenes/pi-packages/commit/c0790ad6d1d15defaba60097d803618b4d8c461c))
+
+## [23.0.3](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v23.0.2...pi-permission-system-v23.0.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **pi-permission-system:** preserve tool expansion in inline permission prompts ([6a0d241](https://github.com/gotgenes/pi-packages/commit/6a0d241291f8eefa51493b683e12514a83f295bd))
+
+
+### Documentation
+
+* **pi-permission-system:** document tool expansion during permission prompts ([f4098d3](https://github.com/gotgenes/pi-packages/commit/f4098d331efc72538ee3836ffb4056beee8cbed0))
+
+## [23.0.2](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v23.0.1...pi-permission-system-v23.0.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **pi-permission-system:** create forwarding request files owner-only ([8c77c72](https://github.com/gotgenes/pi-packages/commit/8c77c7228a52d3b57397c7d53d301d002087d92f)), closes [#647](https://github.com/gotgenes/pi-packages/issues/647)
+* **pi-permission-system:** create permission logs owner-only ([6043cf8](https://github.com/gotgenes/pi-packages/commit/6043cf81bbe6332290d2d6bc8882ba1eadf181cc)), closes [#647](https://github.com/gotgenes/pi-packages/issues/647)
+* **pi-permission-system:** mask sensitive-keyed values in permission logs ([05cb12a](https://github.com/gotgenes/pi-packages/commit/05cb12a1c85e3030f6de3a4ed20cf1cd150e2d56)), closes [#647](https://github.com/gotgenes/pi-packages/issues/647)
+* **pi-permission-system:** redact generic tool input in the review log ([2035fb2](https://github.com/gotgenes/pi-packages/commit/2035fb2276efd75daa8d1f4e6e2af8e67763a9f8)), closes [#647](https://github.com/gotgenes/pi-packages/issues/647)
+
+
+### Documentation
+
+* **pi-permission-system:** link ADR 0010 by absolute URL from shipped docs ([0384af6](https://github.com/gotgenes/pi-packages/commit/0384af6483bd1a2d7f00a5a91efbe241c6d6898f)), closes [#647](https://github.com/gotgenes/pi-packages/issues/647)
+* **pi-permission-system:** record ADR 0010 on permission-log secret exposure ([c13b48a](https://github.com/gotgenes/pi-packages/commit/c13b48a9a14635d25af18a2c0f70bf765141a623)), closes [#647](https://github.com/gotgenes/pi-packages/issues/647)
+
+## [23.0.1](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v23.0.0...pi-permission-system-v23.0.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **pi-permission-system:** fold separators on both sides of a win32 path match ([50e2ac0](https://github.com/gotgenes/pi-packages/commit/50e2ac0dd66b4b308a676849a09e3fff59e754be)), closes [#653](https://github.com/gotgenes/pi-packages/issues/653)
+
+
+### Documentation
+
+* **pi-permission-system:** record the symmetric win32 separator fold ([e2eea21](https://github.com/gotgenes/pi-packages/commit/e2eea21e0aac1212f46be9680fb59146b90c68f7)), closes [#653](https://github.com/gotgenes/pi-packages/issues/653)
+
+## [23.0.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v22.0.0...pi-permission-system-v23.0.0) (2026-07-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pi-permission-system:** path values embedded in `--opt=value` bash tokens are now extracted and gated by the `path` and `external_directory` surfaces. Previously they were invisible to both, so a permissive `bash` rule such as `grep *` allowed them. Add an allow pattern on `external_directory` or `path` for an intended target.
+* **pi-permission-system:** bash commands referencing existing bare-named files or in-project symlinks are now gated by `path` rules (matched against the canonical, symlink-resolved form) and by `external_directory` when they resolve outside the working directory. Previously a permissive `bash` allow rule such as `cat *` bypassed both. A bare token naming no file is still dropped, so `git status`-style commands are unaffected. To restore prior behavior for an intended target, add an allow pattern on `external_directory` (for outside-CWD paths) or on `path`.
+
+### Bug Fixes
+
+* **pi-permission-system:** classify path values embedded in --opt=value tokens ([0be19fd](https://github.com/gotgenes/pi-packages/commit/0be19fd209254ea76840747c128d3bc5112a912b)), closes [#645](https://github.com/gotgenes/pi-packages/issues/645)
+* **pi-permission-system:** gate existing bare-named files and symlinks in bash commands ([9467858](https://github.com/gotgenes/pi-packages/commit/9467858cdb8824cbdcf5a05994dd0d6b3784cbaa)), closes [#645](https://github.com/gotgenes/pi-packages/issues/645)
+
+
+### Documentation
+
+* **pi-permission-system:** update architecture and skill docs for probe-based path candidacy ([90c402d](https://github.com/gotgenes/pi-packages/commit/90c402d54edbc857597aca66e0cb5f01bade550f)), closes [#645](https://github.com/gotgenes/pi-packages/issues/645)
+
+## [22.0.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v21.0.0...pi-permission-system-v22.0.0) (2026-07-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pi-permission-system:** In an untrusted project, project-scoped permission configuration (project config.json and project-agent frontmatter) and project-scoped runtime config (yoloMode, permissionReviewLog, etc.) are no longer loaded until the user grants project trust. Only global policy applies. Grant project trust, or set defaultProjectTrust, to restore the prior behavior.
+
+### Features
+
+* **pi-permission-system:** support skipping project scope in loadAndMergeConfigs ([e5a2e57](https://github.com/gotgenes/pi-packages/commit/e5a2e57b39c7bae44e7ac126b24094c2d5dce155))
+
+
+### Bug Fixes
+
+* **pi-permission-system:** gate project-scoped config on project trust ([f264e71](https://github.com/gotgenes/pi-packages/commit/f264e711b90c7947d805bec654bc78199a76fada))
+
+
+### Documentation
+
+* **pi-permission-system:** document project-trust gating for project config ([e955a29](https://github.com/gotgenes/pi-packages/commit/e955a299156215be57144000d5157481615d8060))
+
+## [21.0.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v20.10.0...pi-permission-system-v21.0.0) (2026-07-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pi-permission-system:** A session whose project/agent/project-agent config is invalid previously inherited a lower scope's `allow` rules unchanged; those surfaces now resolve to `ask` (prompt) until the invalid config is corrected. Only sessions that already emit a config-validation warning are affected. Fix the reported config issues and reload to restore the intended policy.
+
+### Features
+
+* **pi-permission-system:** add floorAllowsToAsk allow→ask overlay ([#646](https://github.com/gotgenes/pi-packages/issues/646)) ([8dbdcd7](https://github.com/gotgenes/pi-packages/commit/8dbdcd75bd8c6f62528d0466f93cfefa039f3d4b))
+* **pi-permission-system:** mark invalid non-global config scopes ([#646](https://github.com/gotgenes/pi-packages/issues/646)) ([1abd318](https://github.com/gotgenes/pi-packages/commit/1abd3182b7c1b6304d0ef28acfbb59c470508a43))
+
+
+### Bug Fixes
+
+* **pi-permission-system:** fail closed when a higher-precedence config scope is invalid ([#646](https://github.com/gotgenes/pi-packages/issues/646)) ([b3c11c0](https://github.com/gotgenes/pi-packages/commit/b3c11c0984b7d9849349c5d8d0f1de111d1c7a03))
+
+
+### Documentation
+
+* **pi-permission-system:** document cross-scope fail-closed config clamp ([#646](https://github.com/gotgenes/pi-packages/issues/646)) ([7903b4c](https://github.com/gotgenes/pi-packages/commit/7903b4cc15710618a6f0ed5cc302687af18db4be))
+
+## [20.10.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v20.9.1...pi-permission-system-v20.10.0) (2026-07-21)
+
+
+### Features
+
+* **pi-permission-system:** thread a review-log seam into the authorizer chain ([b086474](https://github.com/gotgenes/pi-packages/commit/b086474e91c79b02632ee76bbaa3e72e39f29e40))
+
+## [20.9.1](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v20.9.0...pi-permission-system-v20.9.1) (2026-07-20)
+
+
+### Documentation
+
+* **pi-permission-system:** cite pi-permission-model-judge as a registerAuthorizer example ([6bc1e67](https://github.com/gotgenes/pi-packages/commit/6bc1e6710ea70c7d95b87d77fb4e744f0b81e614))
+
+## [20.9.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v20.8.0...pi-permission-system-v20.9.0) (2026-07-19)
+
+
+### Features
+
+* **pi-permission-system:** add authorizerChain config field ([#599](https://github.com/gotgenes/pi-packages/issues/599)) ([6c0bb72](https://github.com/gotgenes/pi-packages/commit/6c0bb72680d864b70e8fac5bb5c480b9a96751f8))
+* **pi-permission-system:** add registerAuthorizer cross-extension seam ([#599](https://github.com/gotgenes/pi-packages/issues/599)) ([ea60900](https://github.com/gotgenes/pi-packages/commit/ea60900439d68ccc028ba75c3e432945e0ac3b72))
+* **pi-permission-system:** cap link verdicts with the delegation envelope ([#599](https://github.com/gotgenes/pi-packages/issues/599)) ([28733fc](https://github.com/gotgenes/pi-packages/commit/28733fca298f1fea1f7a810b61728f9c96bf225f))
+* **pi-permission-system:** inject a session-scoped PermissionQuery into chain links ([#599](https://github.com/gotgenes/pi-packages/issues/599)) ([29452ff](https://github.com/gotgenes/pi-packages/commit/29452ff8cbec6abc431a318b7937843ecefb724d))
+* **pi-permission-system:** resolve the configured authorizer chain ([#599](https://github.com/gotgenes/pi-packages/issues/599)) ([fb366d9](https://github.com/gotgenes/pi-packages/commit/fb366d9aed47ab439ffc033e4967a4285d37fe8a))
+
+
+### Documentation
+
+* **pi-permission-system:** document registerAuthorizer + authorizerChain and mark Phase 12 Step 5 complete ([#599](https://github.com/gotgenes/pi-packages/issues/599)) ([1d6b228](https://github.com/gotgenes/pi-packages/commit/1d6b22889296b3277a118cc8168486664c691305))
+
+## [20.8.0](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v20.7.3...pi-permission-system-v20.8.0) (2026-07-18)
+
+
+### Features
+
+* **pi-permission-system:** accept pre-fixed path-values intents for forwarded serving ([ab60874](https://github.com/gotgenes/pi-packages/commit/ab6087464c7719c01bd7f2a15fd4c56a1a7e9f93))
+* **pi-permission-system:** declare ForwardedAccessIntent wire schema with tolerant read ([#596](https://github.com/gotgenes/pi-packages/issues/596)) ([66ddbef](https://github.com/gotgenes/pi-packages/commit/66ddbef74e3fa6cd41d17358a0b817ae91d49ed1))
+* **pi-permission-system:** emit access-intent facts from the bash path gates ([#596](https://github.com/gotgenes/pi-packages/issues/596)) ([1a0e6de](https://github.com/gotgenes/pi-packages/commit/1a0e6de3fdf411ab576d0c9aa5571ff23cb5f179))
+* **pi-permission-system:** emit access-intent facts from the per-tool gate ([#596](https://github.com/gotgenes/pi-packages/issues/596)) ([2e17256](https://github.com/gotgenes/pi-packages/commit/2e1725695442b10073ea627ce9699ef363e4c77c))
+* **pi-permission-system:** emit access-intent facts from the skill gates ([#596](https://github.com/gotgenes/pi-packages/issues/596)) ([5a20033](https://github.com/gotgenes/pi-packages/commit/5a20033fca9f33dee576c5d39c0c04e468d2d031))
+* **pi-permission-system:** emit access-intent facts from the tool path gates ([#596](https://github.com/gotgenes/pi-packages/issues/596)) ([93a3398](https://github.com/gotgenes/pi-packages/commit/93a3398245b06fe6cb80f841d2a2ca5dc8172de5))
+* **pi-permission-system:** serialize the child-fixed access intent onto the forwarded request ([#596](https://github.com/gotgenes/pi-packages/issues/596)) ([5234614](https://github.com/gotgenes/pi-packages/commit/52346148c41a097719558175582b57d12e7832d0))
+* **pi-permission-system:** serving resolves the forwarded access intent at gate parity ([#597](https://github.com/gotgenes/pi-packages/issues/597)) ([a8fe815](https://github.com/gotgenes/pi-packages/commit/a8fe815bd70e3243553b7cac6841ec270e20bf23))
+
+
+### Documentation
+
+* **pi-permission-system:** fix stale ServingPolicy doc comment ([#597](https://github.com/gotgenes/pi-packages/issues/597)) ([64b1b8e](https://github.com/gotgenes/pi-packages/commit/64b1b8e13a8d22ee4f088bef7d54024a81d9a437))
+
 ## [20.7.3](https://github.com/gotgenes/pi-packages/compare/pi-permission-system-v20.7.2...pi-permission-system-v20.7.3) (2026-07-15)
 
 

@@ -5,6 +5,117 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [19.2.1](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v19.2.0...pi-subagents-v19.2.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **pi-subagents:** make escapeXml attribute-safe by escaping quotes ([b6ab6bb](https://github.com/gotgenes/pi-packages/commit/b6ab6bbe43c79d55b86c5c2a6d58adc7ad24d94d))
+* **pi-subagents:** replace turn glyph that overflows its monospace cell ([8a54b9c](https://github.com/gotgenes/pi-packages/commit/8a54b9cabac1d2535e865a9a46ddb8f6845e21aa)), closes [#669](https://github.com/gotgenes/pi-packages/issues/669) [#681](https://github.com/gotgenes/pi-packages/issues/681)
+
+## [19.2.0](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v19.1.0...pi-subagents-v19.2.0) (2026-07-28)
+
+
+### Features
+
+* **pi-subagents:** add the ESC abort-all toggle to /subagents:settings ([#664](https://github.com/gotgenes/pi-packages/issues/664)) ([3e85ae9](https://github.com/gotgenes/pi-packages/commit/3e85ae92d8383c9c26f5d78153f2ba21a521c104))
+* **pi-subagents:** gate ESC abort-all on the interrupt policy ([#664](https://github.com/gotgenes/pi-packages/issues/664)) ([64ec124](https://github.com/gotgenes/pi-packages/commit/64ec124fd9b9b61b71f893e7b5d76ac557287123))
+* **pi-subagents:** persist the abortAllOnInterrupt setting ([#664](https://github.com/gotgenes/pi-packages/issues/664)) ([c371881](https://github.com/gotgenes/pi-packages/commit/c3718814a0398b9f9bd56dbd9bbe0d4c223bf5f8))
+
+
+### Documentation
+
+* **pi-subagents:** document the abortAllOnInterrupt setting ([#664](https://github.com/gotgenes/pi-packages/issues/664)) ([68e47c4](https://github.com/gotgenes/pi-packages/commit/68e47c4447c04474b369f146f12b7521c37a6066))
+
+## [19.1.0](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v19.0.1...pi-subagents-v19.1.0) (2026-07-28)
+
+
+### Features
+
+* **pi-subagents:** add a stopQueued transition to SubagentState ([f7d48a9](https://github.com/gotgenes/pi-packages/commit/f7d48a9a9485f7a3db730485af81fcff50734d1a)), closes [#665](https://github.com/gotgenes/pi-packages/issues/665)
+* **pi-subagents:** fire the terminal observer from Subagent.stopQueued ([0100cb6](https://github.com/gotgenes/pi-packages/commit/0100cb61d1fe2543358bb5bdbd51643381037f84)), closes [#665](https://github.com/gotgenes/pi-packages/issues/665)
+
+
+### Bug Fixes
+
+* **pi-subagents:** emit terminal lifecycle when a queued agent is stopped ([a4fda3d](https://github.com/gotgenes/pi-packages/commit/a4fda3db09dfd37979bcbaa2328c1ac44027d391)), closes [#665](https://github.com/gotgenes/pi-packages/issues/665)
+* **pi-subagents:** report a never-started agent honestly in get_subagent_result ([210d521](https://github.com/gotgenes/pi-packages/commit/210d5212d73b12c86f2f7c148e7e27629e4c1482))
+* **pi-subagents:** stop nudging a session that is shutting down ([d69419b](https://github.com/gotgenes/pi-packages/commit/d69419b116cd3cc431f09df08147094c09241ccf))
+* **pi-subagents:** tell the truth in a stopped-while-queued notification ([b4fe2b8](https://github.com/gotgenes/pi-packages/commit/b4fe2b8f6f6a9e5f1f366369e4f55a5121fe4da7)), closes [#665](https://github.com/gotgenes/pi-packages/issues/665)
+
+
+### Documentation
+
+* **pi-subagents:** document the stopped-while-queued lifecycle ([15719f4](https://github.com/gotgenes/pi-packages/commit/15719f48af67548e18f985a0814cb16a1cfa9b2c))
+
+## [19.0.1](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v19.0.0...pi-subagents-v19.0.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **pi-subagents:** end a get_subagent_result wait on parent interrupt ([#662](https://github.com/gotgenes/pi-packages/issues/662)) ([97abfa1](https://github.com/gotgenes/pi-packages/commit/97abfa1d5467e18fa7e14ebb0d7a4f784b114e8c))
+* **pi-subagents:** honor wait:true for queued agents ([#662](https://github.com/gotgenes/pi-packages/issues/662)) ([fb298c6](https://github.com/gotgenes/pi-packages/commit/fb298c6ce66bff9e974a59f8d5c070f7c245c5ea))
+* **pi-subagents:** track the live resume in the Subagent promise getter ([#662](https://github.com/gotgenes/pi-packages/issues/662)) ([ceb8234](https://github.com/gotgenes/pi-packages/commit/ceb8234ef4205ddd6c9d9cee46c5875156bcadf1))
+
+## [19.0.0](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v18.1.2...pi-subagents-v19.0.0) (2026-07-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pi-subagents:** @gotgenes/pi-subagents now requires @earendil-works/pi-coding-agent >= 0.80.5, raised from >= 0.75.0. Nudge delivery is gated on the agent_settled lifecycle event, which Pi added in 0.80.4 and first published to npm in 0.80.5 (0.80.4 was tagged but never published). On an older host the event never fires and completion nudges would never be delivered. Upgrade Pi to 0.80.5 or newer.
+
+### Bug Fixes
+
+* **pi-subagents:** gate completion nudges on the parent turn boundary ([#661](https://github.com/gotgenes/pi-packages/issues/661)) ([8f7f387](https://github.com/gotgenes/pi-packages/commit/8f7f387dc38d181589acaa5016e0a8810cbac825))
+
+## [18.1.2](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v18.1.1...pi-subagents-v18.1.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **pi-subagents:** strip the inherited parent cwd footer from child prompts ([449078d](https://github.com/gotgenes/pi-packages/commit/449078d035f287ad0d7c5b7b6d5db9d00bf35f69)), closes [#640](https://github.com/gotgenes/pi-packages/issues/640)
+
+
+### Documentation
+
+* **pi-subagents:** record the inherited cwd-footer strip ([f4764d5](https://github.com/gotgenes/pi-packages/commit/f4764d5f00110da8df3a39c3524a5446b0a5b86e)), closes [#640](https://github.com/gotgenes/pi-packages/issues/640)
+
+## [18.1.1](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v18.1.0...pi-subagents-v18.1.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **pi-subagents:** add subagents:resumed observer channel ([#466](https://github.com/gotgenes/pi-packages/issues/466)) ([021ad39](https://github.com/gotgenes/pi-packages/commit/021ad396c7d9d83037cb3327c5a71e17bb67a0cc))
+* **pi-subagents:** route resume termination through completion observer ([#466](https://github.com/gotgenes/pi-packages/issues/466)) ([58f2543](https://github.com/gotgenes/pi-packages/commit/58f25431689059ebd706af54d4daf7990278ca42))
+
+
+### Documentation
+
+* **pi-subagents:** document subagents:resumed and land Phase 21 Step 2 ([#466](https://github.com/gotgenes/pi-packages/issues/466)) ([a404e9c](https://github.com/gotgenes/pi-packages/commit/a404e9cbe935a31f4a5c0ff5a820cb5e3d64a807))
+
+## [18.1.0](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v18.0.3...pi-subagents-v18.1.0) (2026-07-20)
+
+
+### Features
+
+* **pi-subagents:** add consumption state to SubagentState ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([ed96647](https://github.com/gotgenes/pi-packages/commit/ed966475ecb042bdd2c6c217cc376f67a6358c5a))
+* **pi-subagents:** add session-retention settings ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([aef24eb](https://github.com/gotgenes/pi-packages/commit/aef24eb23757eaba553310530222517b776fb3c7))
+* **pi-subagents:** add Subagent.releaseSession with outputFile capture ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([d9e7871](https://github.com/gotgenes/pi-packages/commit/d9e7871ae8cf72c7e93a5a8a6904e7cad21ffaa9))
+
+
+### Bug Fixes
+
+* **pi-subagents:** honest messages and transcript pointer for released sessions ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([4b9e7d7](https://github.com/gotgenes/pi-packages/commit/4b9e7d786d072f0b37a09a30c287f6e181a5430c))
+* **pi-subagents:** mark foreground and resume returns consumed ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([a9c7e92](https://github.com/gotgenes/pi-packages/commit/a9c7e9222f5a6010c06cb1a522f77740760c28ba))
+* **pi-subagents:** move consumed-result tracking from notification layer to domain ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([0cedaad](https://github.com/gotgenes/pi-packages/commit/0cedaad5b95c7bd5c8843a50f3bc4ed76a00c98e))
+* **pi-subagents:** retain records and release sessions via consumption-aware sweep ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([0136408](https://github.com/gotgenes/pi-packages/commit/013640874b5e3ed62d068d9478840c6c02a745e0))
+
+
+### Documentation
+
+* **pi-subagents:** refresh stale evicted-descriptor comments ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([fb3e4fc](https://github.com/gotgenes/pi-packages/commit/fb3e4fca2983ce7f79b43067cca5325f10a2aaaa))
+* **pi-subagents:** update architecture, README, and skill for consumption-aware retention ([#617](https://github.com/gotgenes/pi-packages/issues/617)) ([a4bd166](https://github.com/gotgenes/pi-packages/commit/a4bd166c244c92708d71533173a5b879d8badcb5))
+
 ## [18.0.3](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v18.0.2...pi-subagents-v18.0.3) (2026-07-15)
 
 

@@ -9,7 +9,7 @@ import type {
 } from "#src/handlers/gates/descriptor";
 import { isGateBypass, isGateDescriptor } from "#src/handlers/gates/descriptor";
 import type { ToolCallContext } from "#src/handlers/gates/types";
-import { pathFlavorForPlatform, win32PathFlavor } from "#src/path/path-flavor";
+import { posixPathFlavor, win32PathFlavor } from "#src/path/path-flavor";
 import { PathNormalizer } from "#src/path-normalizer";
 import type { ScopedPermissionResolver } from "#src/permission-resolver";
 import type { PermissionCheckResult } from "#src/types";
@@ -63,7 +63,7 @@ async function describeGate(
     tcc.toolName === "bash" && command
       ? await BashProgram.parse(
           command,
-          new PathNormalizer(pathFlavorForPlatform(process.platform), tcc.cwd),
+          new PathNormalizer(posixPathFlavor, tcc.cwd),
         )
       : null;
   return describeBashExternalDirectoryGate(tcc, bashProgram, resolver);
@@ -101,6 +101,22 @@ describe("describeBashExternalDirectoryGate", () => {
       agentName: undefined,
     });
     expect(intentValues(intent)).toEqual(["/outside/a.ts"]);
+  });
+
+  it("carries the deciding path's access facts on promptDetails (bash external_directory surface)", async () => {
+    const resolver = makeResolver(makeCheckResult("ask"));
+    const result = (await describeGate(
+      makeTcc({ input: { command: "cat /outside/a.ts" } }),
+      resolver,
+    )) as GateDescriptor;
+    const intent = resolver.resolve.mock.calls[0][0];
+    const path = intent.kind === "access-path" ? intent.path : undefined;
+    expect(path).toBeDefined();
+    expect(result.promptDetails.accessIntent).toEqual({
+      surface: "external_directory",
+      matchValues: path?.matchValues(),
+      boundaryValue: path?.boundaryValue(),
+    });
   });
 
   it("returns GateBypass when all external paths are session-covered", async () => {

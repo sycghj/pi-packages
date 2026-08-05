@@ -6,7 +6,6 @@
  * Follows the same pattern as pi-permission-system's ExtensionRuntime.
  */
 
-import type { Model } from "@earendil-works/pi-ai";
 import { buildParentSnapshot, type ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { ModelInfo } from "#src/tools/spawn-config";
 import type { SessionContext } from "#src/types";
@@ -55,7 +54,7 @@ export class SubagentRuntime {
   /** Extract model info from the current session context. */
   getModelInfo(): ModelInfo {
     return {
-      parentModel: this.currentCtx?.model as Model<any> | undefined,
+      parentModel: this.currentCtx?.model,
       modelRegistry: this.currentCtx?.modelRegistry,
     };
   }

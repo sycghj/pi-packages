@@ -47,11 +47,6 @@ The report is advisory — you decide what lands.
 Do not tidy code the change will not touch — that is scope creep, not Tidy First.
 If the assessor reports "no preparatory tidying warranted," proceed directly to the change.
 
-> **First-live-use checkpoint (added 2026-07-13).**
-> The `tidy-first-assessor` is new and unproven in practice.
-> On its first few dispatches, check its **Rejected as scope creep** list against its **Recommended** list: if it recommends tidying a module the change will not touch, its scope boundary is too loose — tighten "The discipline (and its boundary)" in `.pi/agents/tidy-first-assessor.md`.
-> Remove this callout once the boundary has held across a handful of issues.
-
 ## Step 4: Proceed
 
 After landing the recommended preparatory commits (if any), continue to the normal TDD or build cycle.

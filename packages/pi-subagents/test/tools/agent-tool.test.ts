@@ -112,6 +112,35 @@ describe("AgentTool — resume path", () => {
 		expect(result.content[0].text).toContain("no active session");
 	});
 
+	it("returns not-found copy without claiming cleanup for an unknown resume ID", async () => {
+		const deps = createToolDeps();
+		deps.manager.getRecord = vi.fn().mockReturnValue(undefined);
+		const result = await execute(deps, {
+			prompt: "continue",
+			description: "resume",
+			subagent_type: "general-purpose",
+			resume: "nonexistent",
+		});
+		expect(result.content[0].text).toContain("Agent not found");
+		expect(result.content[0].text).not.toContain("cleaned up");
+	});
+
+	it("points a released-agent resume at get_subagent_result instead of resuming", async () => {
+		const deps = createToolDeps();
+		const released = createTestSubagent();
+		released.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession(), "/tasks/agent.jsonl"));
+		released.releaseSession();
+		deps.manager.getRecord = vi.fn().mockReturnValue(released);
+		const result = await execute(deps, {
+			prompt: "continue",
+			description: "resume",
+			subagent_type: "general-purpose",
+			resume: "agent-1",
+		});
+		expect(result.content[0].text).toContain("get_subagent_result");
+		expect(deps.manager.resume).not.toHaveBeenCalled();
+	});
+
 	it("returns result text on successful resume", async () => {
 		const deps = createToolDeps();
 		const resumeRecord = createTestSubagent();
@@ -125,6 +154,22 @@ describe("AgentTool — resume path", () => {
 			resume: "agent-1",
 		});
 		expect(result.content[0].text).toContain("Resumed output.");
+	});
+
+	it("marks the resumed record consumed (resume-return delivery edge)", async () => {
+		const deps = createToolDeps();
+		const resumeRecord = createTestSubagent();
+		resumeRecord.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession()));
+		deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+		const resumed = createTestSubagent({ result: "Resumed output." });
+		deps.manager.resume = vi.fn().mockResolvedValue(resumed);
+		await execute(deps, {
+			prompt: "continue",
+			description: "resume",
+			subagent_type: "general-purpose",
+			resume: "agent-1",
+		});
+		expect(resumed.consumed).toBe(true);
 	});
 });
 

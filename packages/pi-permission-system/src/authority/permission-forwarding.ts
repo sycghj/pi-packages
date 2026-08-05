@@ -66,6 +66,56 @@ export interface ForwardedSessionApproval {
   patterns: readonly string[];
 }
 
+/**
+ * The child-fixed facts a gate emits: the surface it evaluated and the match
+ * set it computed. `requesterCwd` and `principal` are stamped at the escalation
+ * edge (`ParentAuthorizer`), so a gate carries only what it alone can produce.
+ *
+ * Strings only — an `AccessPath` never crosses onto the wire
+ * (`docs/decisions/0002-path-values-string-boundary.md`).
+ */
+export interface ForwardedAccessFacts {
+  /** Gate surface: `"path"`, `"external_directory"`, `"bash"`, a tool name, or a skill name. */
+  surface: string;
+  /**
+   * The child-fixed match set. Path surface: `AccessPath.matchValues()`
+   * (absolute ∪ cwd-relative ∪ canonical), computed at the child. Non-path
+   * surface: the already-portable single value as a one-element array.
+   */
+  matchValues: string[];
+  /** `AccessPath.boundaryValue()` (canonical) for a path surface; `null` for a non-path surface. */
+  boundaryValue: string | null;
+}
+
+/**
+ * The forwarded-wire access intent (ADR 0008 §2): the child-fixed access facts
+ * plus the requester identity the escalation edge stamps.
+ *
+ * The serving node resolves against this intent directly (Step 3, [#597]),
+ * using `matchValues` as-is — it never re-derives a path through its own
+ * `PathNormalizer`/cwd. See
+ * `docs/decisions/0008-cross-session-access-intent.md`.
+ */
+export interface ForwardedAccessIntent extends ForwardedAccessFacts {
+  /** The requester's cwd, for provenance/disclosure — never for parent re-derivation. */
+  requesterCwd: string;
+  /** Who is requesting. */
+  principal: {
+    sessionId: string;
+    agentName: string;
+  };
+}
+
+/**
+ * Portable path identity from a child worktree. The serving node may prefer
+ * `parentEquivalent` for recorded-authority checks when present, so a temp
+ * worktree path is not reinterpreted as an external path.
+ */
+export interface ForwardedPortablePath {
+  projectRelative?: string;
+  parentEquivalent?: string;
+}
+
 export type ForwardedPermissionRequest = {
   id: string;
   createdAt: number;
@@ -89,6 +139,18 @@ export type ForwardedPermissionRequest = {
    * omits it, and the serving dialog then offers no scope choice).
    */
   sessionApproval?: ForwardedSessionApproval;
+  /**
+   * The child-fixed access intent (ADR 0008 §2). Optional for version-skew
+   * tolerance: an older child omits it, and the serving node floors to `ask`
+   * (Step 3). Present on a current child's request for every gate surface.
+   */
+  accessIntent?: ForwardedAccessIntent;
+  /**
+   * Portable path identity from a child worktree. Optional for version-skew;
+   * serving nodes prefer `parentEquivalent` for recorded-authority checks when
+   * present so a temp worktree path is not reinterpreted as an external path.
+   */
+  portablePath?: ForwardedPortablePath;
 };
 
 export type ForwardedPermissionResponse = {

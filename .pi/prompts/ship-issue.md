@@ -53,6 +53,7 @@ If either fails, fix the issues and commit before pushing.
 1. Run `git rev-parse HEAD` to capture the full 40-char SHA.
    Pass that exact value to `ci_find` — never hand-expand the short SHA from the `git push` output, and never type a SHA from memory.
 2. Use `ci_find` with that SHA and workflow `ci` to locate the CI run.
+   If it times out, re-check the SHA you passed against `git rev-parse HEAD` before assuming a timing miss — a truncated or retyped SHA produces the same timeout (Refs #640).
 3. Use `ci_watch` with the returned `run_id` and workflow `ci` to wait for it to complete.
 4. If the run conclusion is `failure`, stop and report.
    Do not close the issue or merge anything.
@@ -60,7 +61,7 @@ If either fails, fix the issues and commit before pushing.
 
 ## 4b. Check for a stacked release
 
-First check the unreleased range for a releasing commit: `git log --oneline <last-tag>..HEAD`.
+First check the unreleased range for a releasing commit: `git log --oneline <last-tag>..HEAD -- packages/<pkg>/` (scope to the shipped package's path — a package tag many releases old otherwise dumps every package's commits and truncates the output).
 If every commit is a non-releasing type — the `hidden: true` changelog sections in `release-please-config.json` (`refactor:`/`style:`/`test:`/`build:`/`ci:`) — release-please will cut nothing now; the work auto-batches until a releasing commit lands.
 A `docs:` commit cuts a patch only when it touches a file under `packages/<pkg>/` that is **not** in `exclude-paths`.
 Files outside the package tree (`.pi/skills/`, root `AGENTS.md`/`README.md`) are attributed to no package; together with `exclude-paths` files (`docs/plans`, `docs/retro`, a package's `docs/architecture`) they cut nothing now and auto-batch (Refs #505).
@@ -95,6 +96,10 @@ The comment should include:
 
 Then use `issue_close` with issue number `$1` and the summary as the comment.
 
+When `$1` is a third-party **PR** adopted via `/review-third-party-pr` (we re-implemented rather than merged), the close target is a PR, not an issue.
+Verify with `gh api repos/gotgenes/pi-packages/issues/$1 --jq '.pull_request != null'`.
+Close it with `gh pr comment` then `gh pr close` — never merge — crediting the contributor by `@login`.
+
 Then check whether this push shipped work for **other** issues (a stacked refactor/enabler, other `(#M)` commit refs, or sibling `docs/plans/`/`docs/retro/` files in the `<pkg-tag>..HEAD` range).
 A mid-batch sibling that shipped on its own `/ship-issue` is already closed by that ship — this scan is for stacked work that never had a ship of its own.
 Close each with its own short summary — release-please omits `refactor:` commits from the changelog, so a stacked refactor issue leaves no reminder.
@@ -114,15 +119,24 @@ Skip this step entirely if step 4b recorded a defer/batch decision — the relea
    - If `release_pr_merge` returns an error (not mergeable), stop and report — let the user decide.
    - Exception: if it fails with `merge_state: UNSTABLE`, check `gh pr view <N> --json statusCheckRollup`.
      An empty rollup means no checks ran — the `GITHUB_TOKEN` case above; merge with `gh pr merge <N> --rebase` (matches the `defaultMergeMethod: rebase` config so the release lands as a linear commit, not a merge bubble), then `git pull --ff-only`.
-     A non-empty rollup with a check still `IN_PROGRESS` is neither case — wait for it to finish (re-poll `statusCheckRollup`), then retry `release_pr_merge`; do not fall back to `gh pr merge` while a check is running.
+     A non-empty rollup with a check still `IN_PROGRESS` is neither case — wait with `gh pr checks <N> --watch --fail-fast`, then retry `release_pr_merge`; do not fall back to `gh pr merge` while a check is running.
      Stop and report only when the PR is genuinely blocked (`CONFLICTING`/`DIRTY`/`BEHIND` or a failing check).
 5. Use `release_watch` to wait for the release tag to land on HEAD.
+
+## 6b. Verify the release-triggered CI run
+
+Skip this step if step 6 was skipped (deferred/batch release, or no release-please PR found) — there is nothing to verify.
+
+1. Capture the merge commit SHA: `release_pr_merge`'s `head_sha`, or `git rev-parse HEAD` after `release_watch`.
+2. Use `ci_find` with that SHA and workflow `ci`, then `ci_watch` the returned `run_id`.
+3. If the `release-please` or `publish` job failed, or `publish` was skipped when a release was expected, stop — do not proceed to step 7.
+   Resolve per the recovery runbook in `AGENTS.md` (a `release-please` job can fail after already tagging/releasing, silently skipping `publish`), then re-verify before continuing.
 
 ## 7. Final report
 
 Print:
 
-- The new HEAD on `main` (`git log --oneline -1`).
+- The new HEAD on `main` (`git log --oneline -1`); confirm `git status -sb` shows no unpushed commits before naming it.
 - The released version, if a release commit just landed (`git tag --points-at HEAD` or read `package.json`).
 - Issue close confirmation.
 - Anything that was skipped and why.
@@ -137,4 +151,5 @@ Do **not** recommend the next issue to plan here — `/retro` surfaces the next 
 - Never force-push.
 - Never merge a release-please PR that is genuinely blocked (`CONFLICTING`/`DIRTY`/`BEHIND` or a failing check); `UNSTABLE` from no checks running is the expected `GITHUB_TOKEN` case (step 6.4).
 - If CI fails, the issue stays open.
+- If the release-triggered CI run (step 6b) fails, do not proceed to step 7 until resolved — see the `AGENTS.md` recovery runbook.
 - If multiple release-please PRs exist for the same component, stop and ask — that's a configuration issue, not a normal merge.

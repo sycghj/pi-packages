@@ -17,6 +17,7 @@ export function makeNavigable(overrides: Partial<NavigableSubagent> = {}): Navig
     activeTools: new Map(),
     responseText: "",
     agentMessages: [],
+    outputFile: undefined,
     isSessionReady: () => true,
     subscribeToUpdates: vi.fn(() => () => {}),
     getToolDefinition: vi.fn(() => undefined),

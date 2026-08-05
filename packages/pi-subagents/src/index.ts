@@ -63,6 +63,13 @@ export default function (pi: ExtensionAPI) {
     (msg, opts) => pi.sendMessage(msg, opts),
   );
 
+  // Gate nudge delivery on the parent's agent run. agent_settled fires exactly
+  // once per run (from a finally block, so it also covers error and abort),
+  // whereas agent_end fires once per run segment — retries, auto-compaction and
+  // followUp continuations each emit one.
+  pi.on("agent_start", () => notifications.onParentAgentStart());
+  pi.on("agent_settled", () => notifications.onParentAgentSettled());
+
   // Settings: owns all three in-memory values and handles load/save/emit.
   // onMaxConcurrentChanged is wired to the limiter directly (closure captures by reference).
   const settings = new SettingsManager({
@@ -114,6 +121,7 @@ export default function (pi: ExtensionAPI) {
     observer,
     limiter,
     getRunConfig: () => settings,
+    getRetentionPolicy: () => settings,
   });
 
   // Typed service published via Symbol.for() for cross-extension access.
@@ -141,8 +149,9 @@ export default function (pi: ExtensionAPI) {
   const toolStart = new ToolStartHandler(widget);
   pi.on("tool_execution_start", (event, ctx) => toolStart.handleToolExecutionStart(event, ctx));
 
-  // Abort all subagents when the parent agent loop is interrupted (ESC).
-  const interrupt = new InterruptHandler(manager);
+  // Abort all subagents when the parent agent loop is interrupted (ESC), unless
+  // the user has turned that policy off. The predicate is read at abort time.
+  const interrupt = new InterruptHandler(manager, () => settings.abortAllOnInterrupt);
   pi.on("turn_start", (_event, ctx) => interrupt.handleTurnStart(ctx));
 
   // ---- Agent tool ----
@@ -151,7 +160,7 @@ export default function (pi: ExtensionAPI) {
 
   // ---- get_subagent_result tool ----
 
-  pi.registerTool(new GetResultTool(manager, notifications, registry).toToolDefinition());
+  pi.registerTool(new GetResultTool(manager, registry).toToolDefinition());
 
   // ---- steer_subagent tool ----
 
@@ -162,7 +171,7 @@ export default function (pi: ExtensionAPI) {
   const subagentsSettings = new SubagentsSettingsHandler(settings);
 
   pi.registerCommand("subagents:settings", {
-    description: "Configure subagent settings (concurrency, turn limits)",
+    description: "Configure subagent settings (concurrency, turn limits, retention, interrupt policy)",
     handler: async (_args, ctx) => {
       await subagentsSettings.handle({ ui: ctx.ui });
     },
@@ -178,7 +187,6 @@ export default function (pi: ExtensionAPI) {
       await sessionNavigator.handle({
         ui: ctx.ui,
         agents: manager.listAgents(),
-        evicted: manager.listEvicted(),
         registry,
         cwd: ctx.cwd,
         readFile: (path) => readFileSync(path, "utf8"),

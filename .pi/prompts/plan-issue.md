@@ -1,6 +1,6 @@
 ---
 description: Read a GitHub issue, gather context, and write a numbered plan to the package's docs/plans/
-model: anthropic/claude-opus-4-8
+model: anthropic/claude-opus-5
 ---
 
 # Plan a GitHub issue
@@ -52,9 +52,11 @@ Before investigating the issue, load skills relevant to the change:
    If `docs/plans/archive/` exists, those files use issue numbers from a previous repository — ignore them when resolving conflicts.
 4. Read every issue the body references as a prerequisite or related (`gh issue view <n>`).
    Note whether each is implemented yet — your plan must say what it depends on vs. defers.
+   Then search for open issues the body does **not** reference but that touch the same module or symbol (`gh issue list --state open --search "<symbol>"`) — a sibling issue on the same file changes the framing, and the operator should not have to supply it (Refs #635).
 5. Open the source files most relevant to the change and skim them before writing.
 6. When the plan introduces a public API pattern (package `exports`, `Symbol.for()` accessor, service interface) or agent-facing message formatting (attribution tags, error prefixes, log labels), use colgrep or grep to search sibling packages for the established convention and follow it unless there is a documented reason to diverge.
    When a config key or public field names an SDK/domain concept (a tool-call part, event, or content type), use the SDK's own term for it — verify against the SDK types — rather than adopting a term from the issue body verbatim (Refs #580: `commandField` shipped, then needed renaming to `commandArgument` to match `ToolCall.arguments`).
+   When the change introduces a mechanism a mature ecosystem already standardizes (log redaction, retry/backoff, caching, rate limiting), check what established libraries in that space actually do before building the `ask_user` option set — a set built only from first principles can omit the standard, lowest-maintenance choice (Refs #647).
 7. Determine the issue's **release recommendation** from the package's architecture roadmap, if it is part of one.
    Grep `packages/<PKG>/docs/architecture/architecture.md` for the step that references this issue (`(#$1)` / `[#$1]`) and read its `Release:` tag (defined by the `improvement-discovery` skill):
    - `Release: independent` (or no tag, or the issue is not in any roadmap) → **ship independently**.
@@ -95,6 +97,9 @@ If the issue is third-party (its author is not the gh CLI user, as determined in
 The ambiguity for a third-party issue is not *how* to build it but *whether* the operator wants it built, and in what form.
 Use `ask-user` to confirm the direction before planning: at minimum ask whether to (a) implement the proposal as described, (b) implement a different approach to the same underlying problem, or (c) decline/defer.
 When the issue is in an unfamiliar domain (a platform, protocol, or tool you have not verified), research the domain facts first — the direction options themselves depend on them, and an ungrounded ask gets bounced (Refs #533).
+When an option's differentiator is a behavior change, put the concrete before/after in the pre-ask message — the scenarios where behavior differs and where it does not — since an abstractly-labeled option set gets bounced (Refs #635).
+Label every number in an `ask_user` option or the plan's predicted-effect table as measured or estimated.
+Measure when the command runs in under a minute; an inferred number with false precision ("18.0 s → ~18.5 s") sells an option on a benefit the real measurement may refute (Refs #678).
 When the proposal also has design ambiguities, fold those into the same `ask-user` call.
 Let the operator's answers — not the issue body — drive the plan's Goals and Design Overview.
 
@@ -142,20 +147,30 @@ Then an H1 title (e.g., `# <short descriptive title>`) — required by markdownl
   When a step removes or renames an export, grep all `src/` and `test/` files — plus `.pi/skills/package-*/SKILL.md` and `packages/<PKG>/docs/architecture/` (which name internal symbols in narrative prose, not only tree listings) — for every removed symbol before finalizing the file list (Refs #476).
   When the removed export is a public or cross-extension API surface (a `package.json` `exports` re-export, an event channel, a `Symbol.for()` accessor), also grep the whole `packages/<PKG>/docs/` tree — user guides and top-level docs reference a public mechanism by name, not just `docs/architecture/` (Refs #531).
   When a step reworks the documented behavior of a mechanism rather than removing a symbol (e.g. a patch description, an architecture note, or wording like "prepends" → "includes"), also grep `.pi/skills/package-*/SKILL.md` for the mechanism name — reworded prose carries no removed symbol to match.
+  When a step renames a heading, anchor, or named concept another doc may cite as an example (not just a package symbol), widen the skill grep to the whole `.pi/skills/` tree — a shared skill (`improvement-discovery`, `code-design`) can name a package doc's section by heading, and `package-*` alone misses it (Refs #601).
   When a step resequences or reworks a documented workflow or step-order, grep the edited file itself (not only sibling docs) for other passages describing the same sequence — a prompt or skill often states its workflow twice (a narrative list plus an Output-format section), and editing one leaves the other stale (Refs #534).
   When a step removes a call to a private (non-exported) function, grep the file for other callers — if the removed call was the sole call site, list the function for removal in the same step.
   When the change adds, removes, or moves a module, check `packages/<PKG>/docs/architecture/` for layout listings, complexity tables, health metrics, or domain diagrams that reference the affected files and list them as doc updates.
+  When the issue is a numbered roadmap step, list the architecture-doc `✅` step-mark (heading + Mermaid node) and its `Landed:` note as an expected doc update — `/tdd-plan` lands it at implementation completion; do not defer it to phase-history-write time or declare it out of scope (Refs #540).
   When a step moves a module to a different directory, grep same-directory `./<module>` importers too — not only `#src/<module>` alias imports; a `./`-relative import to a module leaving the directory carries no `#src/` marker to match, so an alias-only grep silently drops it (Refs #559).
   When the change adds, removes, or renames a slash command or user-facing feature, grep `packages/<PKG>/README.md` for the command/feature name and list the stale sections as doc updates — a README documents commands, not module filenames, so the `src/`-symbol grep misses it (Refs #470).
   When a step corrects a literal value that appears in prose (a path, default, or identifier in sample output, log snippets, or ADR code comments), grep the whole `packages/<PKG>/docs/` tree for the old value — not a hand-picked file subset; stale sample logs and decision-record comments do not surface in a `src/`/`test/` grep.
+  When a step changes a character or codepoint, grep the `\uXXXX` escaped form as well as the literal — or scan non-ASCII wholesale (`rg -n '[^\x00-\x7f]'`); a codebase often spells the same glyph both ways, sometimes in one file.
   When a file appears in Module-Level Changes, verify it is not also claimed as unchanged in Non-Goals — contradictions between these sections cause confusion during implementation.
   When a plan step's verify criterion names a specific static-analysis finding as resolved (a clone fingerprint, a dead-code symbol, a complexity target), the step's design or Module-Level Changes must show which change clears it — do not list a finding as expected-gone without a change mapped to it.
+  When the roadmap supplies a metric's recompute command (a `grep`/`fallow` invocation in the health-metrics table), run it at planning time to establish the real baseline and predict the post-change value — do not infer the target number from prose.
+  A coarse grep also counts sites the plan's Non-Goals deliberately keep (presentation dispatch, single-status guards), so reconcile the predicted number against those exclusions rather than claiming a lower one (Refs #563).
   When a step adds a field to a serialized contract (a request/response persisted to disk or sent over the wire) whose reader reconstructs only an allowlist of known fields (a tolerant `asX`-style parser), list that reader as a touch point — an added field is silently dropped on read otherwise, and the gap surfaces only in a cross-consumer round-trip test, not `tsc` (Refs #558).
+  When a step tightens a shared helper's parameter type (e.g. `unknown` → a concrete type with required fields), grep `test/` fixtures as well as `src/` callers and list them as touch points — a partial literal that satisfied the loose type fails the tightened type at compile time, and a `src/`-only call-site grep misses the test fixtures (Refs #539).
+  When a step tightens an **optional** interface field to required (drops `| undefined`), grep the exact `<field>: undefined` literal across all `test/` files — an incidental fixture sets the field to `undefined` without ever reading it, so a grep for the field's *use* sites under-catches (Refs #611).
 - **Test Impact Analysis** — for extraction and refactoring issues: (1) what new unit tests does the extraction enable that were previously impossible or impractical?
   (2) what existing tests become redundant with the new lower-level tests, and can they be simplified or removed?
   (3) which existing tests must stay as-is because they genuinely exercise the layer being extracted?
 - **Invariants at risk** — when the change touches a surface a prior phase step already refactored, list that step's documented invariants (the architecture roadmap's `Outcome:`/`Landed:` bullets) and name the test that pins each — add a test if the invariant lives only in prose.
   A later step must not regress an earlier step's outcome with a green suite.
+  When an invariant is quantitative (a byte-identical prefix, a token budget, a cache or latency characteristic), measure the baseline and predict the post-change value at planning time.
+  A prose argument that the change is "at the tail" or "negligible" is not evidence, and a test pinning adjacent content does not pin the number (Refs #640).
+  When the plan removes the mechanism an existing test's comment credits, spike the removal and run that test at planning time — that the test stays green is a measurement, not an argument (Refs #653).
 - **TDD Order** — numbered red→green→commit cycles.
   Each item names the test surface, what's covered, and the suggested commit message (`test:`, `feat:`, `feat!:`, `fix:`, `docs:`).
   When a refactor replaces a type, interface, or function that a large test file depends on, use lift-and-shift: introduce the new thing alongside the old, migrate callers and fixtures incrementally across steps, then remove the old in a final step.

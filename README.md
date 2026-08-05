@@ -1,32 +1,42 @@
 # pi-packages
 
-A monorepo of [Pi](https://github.com/badlogic/pi-mono) extension packages, published to npm under `@gotgenes/`.
-Some packages (like pi-permission-system) are designed for broad use; others scratch a personal itch and are shared in case they help others.
+A monorepo of [Pi](https://github.com/badlogic/pi-mono) extension packages, originally published to npm under `@gotgenes/`.
+This fork maintains and publishes [`@sycghj/pi-permission-system`](./packages/pi-permission-system/) independently; the other packages remain attributed to their upstream `@gotgenes/` releases.
+
+本 fork 维护的权限扩展认可并支持 [LINUX DO](https://linux.do/) 社区开放、友善、共同创造价值的理念，感谢社区为中文开发者提供交流与分享的平台。
 
 ## Packages
 
-| Package                                                                | Description                                                    | Downloads/month                                                                                                                          |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [@gotgenes/pi-permission-system](./packages/pi-permission-system/)     | Permission enforcement for the Pi coding agent                 | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-permission-system)](https://www.npmjs.com/package/@gotgenes/pi-permission-system)     |
-| [@gotgenes/pi-subagents](./packages/pi-subagents/)                     | Focused, in-process autonomous sub-agent core for Pi           | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-subagents)](https://www.npmjs.com/package/@gotgenes/pi-subagents)                     |
-| [@gotgenes/pi-github-tools](./packages/pi-github-tools/)               | Deterministic GitHub CI, release, and issue tools              | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-github-tools)](https://www.npmjs.com/package/@gotgenes/pi-github-tools)               |
-| [@gotgenes/pi-autoformat](./packages/pi-autoformat/)                   | Prompt-end auto-formatting (Biome, Prettier, etc.)             | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-autoformat)](https://www.npmjs.com/package/@gotgenes/pi-autoformat)                   |
-| [@gotgenes/pi-colgrep](./packages/pi-colgrep/)                         | Semantic code search via ColGrep as an agent tool              | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-colgrep)](https://www.npmjs.com/package/@gotgenes/pi-colgrep)                         |
-| [@gotgenes/pi-session-tools](./packages/pi-session-tools/)             | Session naming and context bridge for multi-session workflows  | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-session-tools)](https://www.npmjs.com/package/@gotgenes/pi-session-tools)             |
-| [@gotgenes/pi-subagents-worktrees](./packages/pi-subagents-worktrees/) | Git worktree isolation WorkspaceProvider for pi-subagents      | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-subagents-worktrees)](https://www.npmjs.com/package/@gotgenes/pi-subagents-worktrees) |
-| [@gotgenes/pi-nocd](./packages/pi-nocd/)                               | System-prompt guard against cd-prefixing the working directory | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-nocd)](https://www.npmjs.com/package/@gotgenes/pi-nocd)                               |
+| Package                                                                      | Description                                                     | Downloads/month                                                                                                                                |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [@sycghj/pi-permission-system](./packages/pi-permission-system/)             | Maintained fork: permission enforcement for the Pi coding agent | [![npm](https://img.shields.io/npm/dm/@sycghj/pi-permission-system)](https://www.npmjs.com/package/@sycghj/pi-permission-system)               |
+| [@gotgenes/pi-permission-model-judge](./packages/pi-permission-model-judge/) | Deny-first typo-path model judge for pi-permission-system       | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-permission-model-judge)](https://www.npmjs.com/package/@gotgenes/pi-permission-model-judge) |
+| [@gotgenes/pi-subagents](./packages/pi-subagents/)                           | Focused, in-process autonomous sub-agent core for Pi            | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-subagents)](https://www.npmjs.com/package/@gotgenes/pi-subagents)                           |
+| [@gotgenes/pi-github-tools](./packages/pi-github-tools/)                     | Deterministic GitHub CI, release, and issue tools               | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-github-tools)](https://www.npmjs.com/package/@gotgenes/pi-github-tools)                     |
+| [@gotgenes/pi-autoformat](./packages/pi-autoformat/)                         | Prompt-end auto-formatting (Biome, Prettier, etc.)              | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-autoformat)](https://www.npmjs.com/package/@gotgenes/pi-autoformat)                         |
+| [@gotgenes/pi-colgrep](./packages/pi-colgrep/)                               | Semantic code search via ColGrep as an agent tool               | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-colgrep)](https://www.npmjs.com/package/@gotgenes/pi-colgrep)                               |
+| [@gotgenes/pi-session-tools](./packages/pi-session-tools/)                   | Session naming and context bridge for multi-session workflows   | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-session-tools)](https://www.npmjs.com/package/@gotgenes/pi-session-tools)                   |
+| [@gotgenes/pi-subagents-worktrees](./packages/pi-subagents-worktrees/)       | Git worktree isolation WorkspaceProvider for pi-subagents       | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-subagents-worktrees)](https://www.npmjs.com/package/@gotgenes/pi-subagents-worktrees)       |
+| [@gotgenes/pi-nocd](./packages/pi-nocd/)                                     | System-prompt guard against cd-prefixing the working directory  | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-nocd)](https://www.npmjs.com/package/@gotgenes/pi-nocd)                                     |
 
 Each package has its own README with setup instructions, usage, and configuration details.
 
 ## Install
 
-Install every package in this repo at once:
+Install the permission-system release maintained by this fork:
+
+```bash
+pi install npm:@sycghj/pi-permission-system
+```
+
+The remaining packages listed above are upstream `@gotgenes/` releases.
+Install every upstream package at once:
 
 ```bash
 pi install git:github.com/gotgenes/pi-packages
 ```
 
-Or install a single package via npm:
+Or install one upstream package via npm:
 
 ```bash
 pi install npm:@gotgenes/<package-name>
@@ -213,7 +223,7 @@ Load the relevant skill before working on a package:
 - `package-pi-permission-system` — for `packages/pi-permission-system/`
 - `package-pi-subagents` — for `packages/pi-subagents/`
 
-The remaining packages (`pi-colgrep`, `pi-session-tools`, `pi-subagents-worktrees`, `pi-nocd`) have no dedicated skill — their READMEs cover everything you need.
+The remaining packages (`pi-colgrep`, `pi-session-tools`, `pi-subagents-worktrees`, `pi-nocd`, `pi-permission-model-judge`) have no dedicated skill — their READMEs cover everything you need.
 
 ## License
 

@@ -1,6 +1,6 @@
 {
   "name": "@gotgenes/pi-subagents",
-  "version": "18.0.3",
+  "version": "19.2.1",
   "type": "module",
   "exports": {
     ".": {
@@ -51,7 +51,7 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.75.0",
-    "@earendil-works/pi-coding-agent": ">=0.75.0",
+    "@earendil-works/pi-coding-agent": ">=0.80.5",
     "@earendil-works/pi-tui": ">=0.75.0"
   },
   "dependencies": {
@@ -72,9 +72,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@earendil-works/pi-ai": "0.79.1",
-    "@earendil-works/pi-coding-agent": "0.79.1",
-    "@earendil-works/pi-tui": "0.79.1",
+    "@earendil-works/pi-ai": "0.80.5",
+    "@earendil-works/pi-coding-agent": "0.80.5",
+    "@earendil-works/pi-tui": "0.80.5",
     "@types/node": "catalog:",
     "rollup": "catalog:",
     "rollup-plugin-dts": "catalog:",

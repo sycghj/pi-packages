@@ -1,26 +1,32 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pathFlavorForPlatform } from "#src/path/path-flavor";
 
 // Mock node:fs so realpathSync (used by canonicalizePath) is controllable.
 // Default is identity so all existing lexical tests are unaffected.
+// Every other fs binding passes through to the real module, so filesystem-
+// backed helpers (lstatSync, mkdtempSync, symlinkSync, …) stay usable here.
 const realpathSync = vi.hoisted(() =>
   vi.fn<(path: string) => string>((p) => p),
 );
-vi.mock("node:fs", () => ({
-  realpathSync,
-  default: { realpathSync },
-}));
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    realpathSync,
+    default: { ...actual, realpathSync },
+  };
+});
 
 import { BashProgram } from "#src/access-intent/bash/program";
-import { pathFlavorForPlatform, win32PathFlavor } from "#src/path/path-flavor";
+import { posixPathFlavor, win32PathFlavor } from "#src/path/path-flavor";
 import { PathNormalizer } from "#src/path-normalizer";
+import { createTmpFixture } from "#test/helpers/tmp-fixture";
 
 describe("BashProgram", () => {
   describe("pathRuleCandidates", () => {
     const cwd = "/projects/my-app";
-    const normalizer = new PathNormalizer(
-      pathFlavorForPlatform(process.platform),
-      cwd,
-    );
+    const normalizer = new PathNormalizer(posixPathFlavor, cwd);
 
     beforeEach(() => {
       realpathSync.mockReset();
@@ -96,70 +102,135 @@ describe("BashProgram", () => {
       expect(fileCandidate?.path.boundaryValue()).toBe("");
     });
 
-    describe("rule-driven bare-token promotion (#509)", () => {
-      it("promotes a bare token when the matcher says it is promotable", async () => {
-        const isPromotable = (token: string): boolean => token === "id_rsa";
-        const program = await BashProgram.parse(
-          "cat id_rsa",
-          normalizer,
-          isPromotable,
+    describe("existence-probe bare-token promotion (#645)", () => {
+      // Candidacy comes from the filesystem, so these run against a real
+      // tmpdir cwd with real lstat/realpath rather than the fake cwd above.
+      const tmp = createTmpFixture();
+      let root: string;
+      let probeNormalizer: PathNormalizer;
+
+      beforeEach(async () => {
+        const actual =
+          await vi.importActual<typeof import("node:fs")>("node:fs");
+        realpathSync.mockImplementation(actual.realpathSync);
+        // Canonicalize the root: on macOS the tmpdir is itself a symlink, so a
+        // lexical root would disagree with every canonical form derived below.
+        root = actual.realpathSync(tmp.dir("pi-perm-bash-"));
+        probeNormalizer = new PathNormalizer(
+          pathFlavorForPlatform(process.platform),
+          root,
         );
+      });
+
+      afterEach(() => {
+        tmp.cleanup();
+      });
+
+      it("promotes a bare token naming an existing file", async () => {
+        tmp.file(root, "id_rsa", "key");
+        const program = await BashProgram.parse("cat id_rsa", probeNormalizer);
         const candidates = program.pathRuleCandidates();
         expect(candidates.map(({ token }) => token)).toEqual(["id_rsa"]);
         expect(candidates[0].path.matchValues()).toEqual([
-          "/projects/my-app/id_rsa",
+          join(root, "id_rsa"),
           "id_rsa",
         ]);
       });
 
-      it("does not promote a bare token the matcher rejects", async () => {
-        const isPromotable = (token: string): boolean => token === "id_rsa";
+      it("drops a bare token naming nothing — `git status` stays silent (#509)", async () => {
+        const program = await BashProgram.parse("git status", probeNormalizer);
+        expect(program.pathRuleCandidates()).toHaveLength(0);
+      });
+
+      it("drops every bare word of a command referencing no real file", async () => {
         const program = await BashProgram.parse(
-          "git status",
-          normalizer,
-          isPromotable,
+          "npm run build && git checkout main",
+          probeNormalizer,
         );
         expect(program.pathRuleCandidates()).toHaveLength(0);
       });
 
-      it("does not promote any bare token with the default no-op matcher", async () => {
-        const program = await BashProgram.parse("cat id_rsa", normalizer);
-        expect(program.pathRuleCandidates()).toHaveLength(0);
+      it("promotes a bare symlink and carries its target as a match value", async () => {
+        // The issue's second repro shape: a_sym -> .some.secret, where the rule
+        // names the target. Raw-token matching could never see this.
+        const secret = tmp.file(root, ".some.secret", "s3cret");
+        tmp.symlink(root, "a_sym", secret);
+        const program = await BashProgram.parse("cat a_sym", probeNormalizer);
+        const candidate = program
+          .pathRuleCandidates()
+          .find((c) => c.token === "a_sym");
+        expect(candidate?.path.matchValues()).toContain(
+          join(root, ".some.secret"),
+        );
+      });
+
+      it("promotes a bare token naming a directory", async () => {
+        tmp.subdir(root, "vault");
+        const program = await BashProgram.parse("ls vault", probeNormalizer);
+        expect(program.pathRuleCandidates().map(({ token }) => token)).toEqual([
+          "vault",
+        ]);
+      });
+
+      it("promotes a dangling symlink — the link is the named operand", async () => {
+        tmp.symlink(root, "dangling", join(root, "gone"));
+        const program = await BashProgram.parse(
+          "cat dangling",
+          probeNormalizer,
+        );
+        expect(program.pathRuleCandidates().map(({ token }) => token)).toEqual([
+          "dangling",
+        ]);
       });
 
       it("keeps a promoted token literal-only after an unknown cd (#393)", async () => {
-        const isPromotable = (token: string): boolean => token === "id_rsa";
+        tmp.file(root, "id_rsa", "key");
         const program = await BashProgram.parse(
           'cd "$DIR" && cat id_rsa',
-          normalizer,
-          isPromotable,
+          probeNormalizer,
         );
-        const candidate = program
-          .pathRuleCandidates()
-          .find((c) => c.token === "id_rsa");
-        expect(candidate?.path.matchValues()).toEqual(["id_rsa"]);
+        // An unknown base cannot be probed against a known directory, so the
+        // token stays unpromoted rather than resolving against the wrong cwd.
+        expect(program.pathRuleCandidates()).toHaveLength(0);
       });
 
       it("does not double-promote a token the shape gate already accepts", async () => {
-        // ./id_rsa already passes classifyTokenAsRuleCandidate; the promoted
-        // fallback must not run (and must not duplicate the candidate).
-        const isPromotable = (): boolean => true;
+        tmp.file(root, "id_rsa", "key");
         const program = await BashProgram.parse(
           "cat ./id_rsa",
-          normalizer,
-          isPromotable,
+          probeNormalizer,
         );
         expect(program.pathRuleCandidates()).toHaveLength(1);
+      });
+
+      it("probes a bare token against the effective directory after a literal cd", async () => {
+        const nested = tmp.subdir(root, "nested");
+        tmp.file(nested, "inner.txt", "x");
+        const program = await BashProgram.parse(
+          "cd nested && cat inner.txt",
+          probeNormalizer,
+        );
+        const candidate = program
+          .pathRuleCandidates()
+          .find((c) => c.token === "inner.txt");
+        expect(candidate?.path.matchValues()).toContain(
+          join(root, "nested", "inner.txt"),
+        );
+      });
+
+      it("consults no policy — promotion needs no matcher argument", async () => {
+        tmp.file(root, "id_rsa", "key");
+        const program = await BashProgram.parse("cat id_rsa", probeNormalizer);
+        expect(program.pathRuleCandidates().map(({ token }) => token)).toEqual([
+          "id_rsa",
+        ]);
       });
     });
   });
 
   describe("externalPaths", () => {
     const cwd = "/projects/my-app";
-    const normalizer = new PathNormalizer(
-      pathFlavorForPlatform(process.platform),
-      cwd,
-    );
+    const normalizer = new PathNormalizer(posixPathFlavor, cwd);
 
     beforeEach(() => {
       realpathSync.mockReset();
@@ -171,6 +242,85 @@ describe("BashProgram", () => {
       // Subset matcher: the path is normalized before comparison.
       expect(program.externalPaths().map((p) => p.value())).toContain(
         "/etc/hosts",
+      );
+    });
+
+    describe("bare tokens escaping the tree via symlink (#645)", () => {
+      const tmp = createTmpFixture();
+      let root: string;
+      let probeNormalizer: PathNormalizer;
+      // Canonical temp dir: on macOS the tmpdir is itself a symlink, so a
+      // lexical path would disagree with every canonical form under assertion.
+      let canonicalDir: (prefix: string) => string;
+
+      beforeEach(async () => {
+        const actual =
+          await vi.importActual<typeof import("node:fs")>("node:fs");
+        realpathSync.mockImplementation(actual.realpathSync);
+        canonicalDir = (prefix) => actual.realpathSync(tmp.dir(prefix));
+        root = canonicalDir("pi-perm-ext-cwd-");
+        probeNormalizer = new PathNormalizer(
+          pathFlavorForPlatform(process.platform),
+          root,
+        );
+      });
+
+      afterEach(() => {
+        tmp.cleanup();
+      });
+
+      it("flags an in-project bare symlink whose target is outside cwd", async () => {
+        // The issue's headline repro:
+        //   printf 'test' > /tmp/pi-permission-test-secret
+        //   ln -s /tmp/pi-permission-test-secret outside-link
+        //   cat outside-link
+        const outsideRoot = canonicalDir("pi-perm-ext-target-");
+        const secret = tmp.file(outsideRoot, "pi-permission-test-secret", "s");
+        tmp.symlink(root, "outside-link", secret);
+
+        const program = await BashProgram.parse(
+          "cat outside-link",
+          probeNormalizer,
+        );
+        expect(program.externalPaths().map((p) => p.boundaryValue())).toContain(
+          secret,
+        );
+      });
+
+      it("does not flag a bare token resolving inside cwd", async () => {
+        tmp.file(root, "inside.txt", "x");
+        const program = await BashProgram.parse(
+          "cat inside.txt",
+          probeNormalizer,
+        );
+        expect(program.externalPaths()).toHaveLength(0);
+      });
+
+      it("does not flag a bare word naming nothing", async () => {
+        const program = await BashProgram.parse("git status", probeNormalizer);
+        expect(program.externalPaths()).toHaveLength(0);
+      });
+
+      it("flags a bare symlink to an outside directory", async () => {
+        const outsideRoot = canonicalDir("pi-perm-ext-dir-");
+        tmp.symlink(root, "vault", outsideRoot);
+        const program = await BashProgram.parse("ls vault", probeNormalizer);
+        expect(program.externalPaths().map((p) => p.boundaryValue())).toContain(
+          outsideRoot,
+        );
+      });
+    });
+
+    it("flags a path embedded in a long option (#645)", async () => {
+      // The issue's second repro: `grep --file=…` under an allowing `grep *`
+      // rule. The flag token is rejected by the shape prelude, so the value is
+      // split out at collection and classified on its own.
+      const program = await BashProgram.parse(
+        "grep --file=/tmp/pi-permission-patterns target",
+        normalizer,
+      );
+      expect(program.externalPaths().map((p) => p.value())).toContain(
+        "/tmp/pi-permission-patterns",
       );
     });
 
@@ -200,10 +350,7 @@ describe("BashProgram", () => {
       it("keeps a non-mount POSIX absolute as a literal rule candidate", async () => {
         const program = await BashProgram.parse("cat /tmp/foo", winNormalizer);
         const candidate = program.pathRuleCandidates()[0];
-        expect(candidate.path.matchValues()).toEqual([
-          "/tmp/foo",
-          "\\tmp\\foo",
-        ]);
+        expect(candidate.path.matchValues()).toEqual(["/tmp/foo"]);
       });
 
       it("folds a drive-mount cd so a following traversal resolves under it", async () => {
@@ -527,7 +674,7 @@ describe("BashProgram", () => {
       });
       const program = await BashProgram.parse(
         "cat /tmp/workspace/file.ts",
-        new PathNormalizer(pathFlavorForPlatform(process.platform), symlinkCwd),
+        new PathNormalizer(posixPathFlavor, symlinkCwd),
       );
       expect(program.externalPaths()).toHaveLength(0);
     });
@@ -535,10 +682,7 @@ describe("BashProgram", () => {
 
   describe("commands", () => {
     const cwd = "/projects/my-app";
-    const normalizer = new PathNormalizer(
-      pathFlavorForPlatform(process.platform),
-      cwd,
-    );
+    const normalizer = new PathNormalizer(posixPathFlavor, cwd);
 
     it("returns a single-element list for a lone command", async () => {
       const program = await BashProgram.parse("npm install pkg", normalizer);
@@ -828,10 +972,7 @@ describe("BashProgram", () => {
 
   it("derives both slices from a single parse", async () => {
     const cwd = "/projects/my-app";
-    const normalizer = new PathNormalizer(
-      pathFlavorForPlatform(process.platform),
-      cwd,
-    );
+    const normalizer = new PathNormalizer(posixPathFlavor, cwd);
     const program = await BashProgram.parse("cat .env /etc/hosts", normalizer);
     expect(program.pathRuleCandidates().map(({ token }) => token)).toEqual([
       ".env",
@@ -844,10 +985,7 @@ describe("BashProgram", () => {
 
   describe("workdir seed (#574)", () => {
     const cwd = "/projects/my-app";
-    const normalizer = new PathNormalizer(
-      pathFlavorForPlatform(process.platform),
-      cwd,
-    );
+    const normalizer = new PathNormalizer(posixPathFlavor, cwd);
 
     beforeEach(() => {
       realpathSync.mockReset();
@@ -855,24 +993,16 @@ describe("BashProgram", () => {
     });
 
     it("flags an absolute workdir outside cwd as an external path", async () => {
-      const program = await BashProgram.parse(
-        "echo hi",
-        normalizer,
-        undefined,
-        {
-          workdir: "/etc",
-        },
-      );
+      const program = await BashProgram.parse("echo hi", normalizer, {
+        workdir: "/etc",
+      });
       expect(program.externalPaths().map((p) => p.value())).toContain("/etc");
     });
 
     it("resolves a relative token against the workdir base", async () => {
-      const program = await BashProgram.parse(
-        "cat ../secret.txt",
-        normalizer,
-        undefined,
-        { workdir: "/etc" },
-      );
+      const program = await BashProgram.parse("cat ../secret.txt", normalizer, {
+        workdir: "/etc",
+      });
       const external = program.externalPaths().map((p) => p.value());
       // ../secret.txt resolves against /etc, not cwd.
       expect(external).toContain("/secret.txt");
@@ -883,7 +1013,6 @@ describe("BashProgram", () => {
       const program = await BashProgram.parse(
         "cat /var/log/syslog",
         normalizer,
-        undefined,
         { workdir: "/etc" },
       );
       const external = program.externalPaths().map((p) => p.value());
@@ -892,24 +1021,18 @@ describe("BashProgram", () => {
     });
 
     it("does not flag a workdir inside cwd, and resolves relative tokens under it", async () => {
-      const program = await BashProgram.parse(
-        "cat ../secret.txt",
-        normalizer,
-        undefined,
-        { workdir: "sub" },
-      );
+      const program = await BashProgram.parse("cat ../secret.txt", normalizer, {
+        workdir: "sub",
+      });
       // ../secret.txt from cwd/sub resolves back to cwd/secret.txt (internal),
       // and the workdir sub is inside cwd — nothing is external.
       expect(program.externalPaths()).toEqual([]);
     });
 
     it("resolves a relative path-rule candidate against the workdir base", async () => {
-      const program = await BashProgram.parse(
-        "cat sub/file.txt",
-        normalizer,
-        undefined,
-        { workdir: "/work" },
-      );
+      const program = await BashProgram.parse("cat sub/file.txt", normalizer, {
+        workdir: "/work",
+      });
       const candidate = program
         .pathRuleCandidates()
         .find(({ token }) => token === "sub/file.txt");
@@ -926,7 +1049,7 @@ describe("BashProgram", () => {
 
     it("applies Git Bash drive-mount semantics to a win32 workdir", async () => {
       const win = new PathNormalizer(win32PathFlavor, "C:\\projects\\app");
-      const program = await BashProgram.parse("echo hi", win, undefined, {
+      const program = await BashProgram.parse("echo hi", win, {
         workdir: "/c/work",
       });
       // /c/work is the MSYS mount for C:\work — outside the cwd, so flagged.

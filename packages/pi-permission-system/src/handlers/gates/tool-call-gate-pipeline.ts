@@ -6,6 +6,8 @@ import {
   type ShellInvocation,
 } from "#src/access-intent/tool-kind";
 import type { ShellToolsConfig } from "#src/config-schema";
+import { extractBashCapability } from "#src/learning/bash-capability-extractor";
+import { gitProjectIdentity } from "#src/learning/capability-fingerprint";
 import type { PathNormalizer } from "#src/path-normalizer";
 import type { ScopedPermissionResolver } from "#src/permission-resolver";
 import type { SkillPromptEntry } from "#src/skill-prompt-sanitizer";
@@ -15,13 +17,14 @@ import {
   ToolPreviewFormatter,
   type ToolPreviewFormatterOptions,
 } from "#src/tool-preview-formatter";
-import type { PathRuleTokenMatcher, PermissionCheckResult } from "#src/types";
+import type { PermissionCheckResult } from "#src/types";
 import { resolveBashCommandCheck } from "./bash-command";
 import { describeBashExternalDirectoryGate } from "./bash-external-directory";
 import { describeBashPathGate } from "./bash-path";
 import type { GateResult } from "./descriptor";
 import { describeExternalDirectoryGate } from "./external-directory";
 import { describePathGate } from "./path";
+import { isSameRepoReadonlyGitCommand } from "./readonly-git-worktree";
 import type { GateRunner } from "./runner";
 import { describeSkillReadGate } from "./skill-read";
 import { describeToolGate } from "./tool";
@@ -52,11 +55,6 @@ export interface ToolCallGateInputs {
    * tool is gated through the bash stack at parity with native `bash` (#574).
    */
   getShellToolAliases(): ShellToolsConfig | undefined;
-  /**
-   * Predicate deciding whether a bare bash token should be promoted into the
-   * `path` rule-candidate surface (#509), scoped to the given agent.
-   */
-  getPromotablePathTokenMatcher(agentName?: string): PathRuleTokenMatcher;
 }
 
 /**
@@ -93,18 +91,24 @@ export class ToolCallGatePipeline {
     );
     const normalizer = this.inputs.getPathNormalizer();
     const bashProgram = shell?.command
-      ? await BashProgram.parse(
-          shell.command,
-          normalizer,
-          this.inputs.getPromotablePathTokenMatcher(tcc.agentName ?? undefined),
-          { workdir: shell.workdir },
-        )
+      ? await BashProgram.parse(shell.command, normalizer, {
+          workdir: shell.workdir,
+        })
       : null;
 
     const formatter = new ToolPreviewFormatter(
       this.inputs.getToolPreviewLimits(),
       this.customFormatters,
     );
+    const bashCapability = bashProgram
+      ? extractBashCapability({
+          program: bashProgram,
+          cwd: tcc.cwd,
+          source: "tool_call",
+          agentName: tcc.agentName,
+          projectIdentity: gitProjectIdentity(`${tcc.cwd}/.git`),
+        })
+      : undefined;
 
     const infraDirs = this.inputs.getInfrastructureReadDirs();
 
@@ -139,7 +143,16 @@ export class ToolCallGatePipeline {
           accessPath,
           shell,
         );
-        toolDescriptor.preCheck = toolCheck;
+        if (bashCapability) {
+          toolDescriptor.learning = {
+            intentFingerprint: bashCapability.fingerprint,
+          };
+        }
+        toolDescriptor.preCheck = sameRepoReadonlyGitCheck(
+          tcc.cwd,
+          bashProgram,
+          toolCheck,
+        );
         return toolDescriptor;
       },
     ];
@@ -221,4 +234,26 @@ export class ToolCallGatePipeline {
       }),
     };
   }
+}
+
+function sameRepoReadonlyGitCheck(
+  cwd: string,
+  bashProgram: BashProgram | null,
+  fallback: PermissionCheckResult,
+): PermissionCheckResult {
+  if (
+    fallback.state === "ask" &&
+    bashProgram &&
+    isSameRepoReadonlyGitCommand(bashProgram.commandText(), cwd)
+  ) {
+    return {
+      state: "allow",
+      toolName: "bash",
+      source: "bash",
+      origin: "builtin",
+      command: bashProgram.commandText(),
+      matchedPattern: "<same-repo-readonly-git>",
+    };
+  }
+  return fallback;
 }

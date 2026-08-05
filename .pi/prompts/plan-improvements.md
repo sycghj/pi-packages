@@ -43,12 +43,14 @@ Note:
 Determine the next phase number N (last completed phase + 1), then immediately call `set_session_name` with `$1 — Phase N Planning` so the session is labelled for the rest of the work.
 
 **Hard gate — the previous phase must be archived first.**
-If Phase N−1's full detailed roadmap (numbered steps with `Outcome:` lines and a dependency diagram) is still inline in `architecture.md` rather than condensed to a completion summary linking a `history/phase-(N−1)-<slug>.md` file, stop and tell the user to run `/finish-phase $1` first, then resume `/plan-improvements $1`.
+If Phase N−1's full detailed roadmap (numbered steps with `Outcome:` lines and a dependency diagram) is still inline in `architecture.md` rather than archived to a `history/phase-(N−1)-<slug>.md` file with only a "Refactoring history" table row left behind, stop and tell the user to run `/finish-phase $1` first, then resume `/plan-improvements $1`.
 Archiving the prior phase — with its step-completion gate and doc reconciliation — is `/finish-phase`'s job; do not do it inline here.
 
 A declared direction for Phase N most often lives **not** in `architecture.md` but in the previous phase's history file — `history/phase-(N−1)-<slug>.md`, whose **Findings** section is where `/finish-phase` records the "leading Phase N candidate."
 Read that history file's Findings before deep-tracing.
 If it (or `architecture.md`) already declares a direction, treat it as a hypothesis, not a commitment — but put the declared candidate in front of the user in your **first** `ask_user`, up front, not a follow-up: a declared candidate surfaced late forces a second round-trip after the composition is already drafted.
+When no explicit candidate line exists, the history file still carries **implicit candidates**: a ⚠️ metric miss recorded in its health-metrics table, and any "deferred" remark inside a step's Landed notes — treat both as declared-candidate carriers with the same first-`ask_user` treatment.
+Every ⚠️ metric miss in the prior history file gets an explicit disposition in the new roadmap — re-target it, accept it with recorded rationale, or supersede it — never a silent drop (Phase 21 planning silently dropped one; this rule closes that gap).
 Let the discovery findings decide.
 
 Before touching any tool, write down a **cause hypothesis**: the first-principles structural problem you expect the next phase to dissolve (structural fusion, a coupling/boundary flaw, a dead subsystem), read against the architecture doc's first-principles section.
@@ -64,8 +66,11 @@ gh issue list --label "pkg:$1" --state open
 ```
 
 Cross-check each open issue against the architecture doc's claims about which issues remain open, and note any that are parked candidates for this phase or already-filed work you must not re-plan.
+An open issue that already names a cause-level finding is a **pre-discovered candidate** — adopt it as a phase step under its existing number rather than re-deriving or re-filing it (Phase 21's two strongest steps were adopted this way).
+Read each labeled issue's body before counting it in scope: a package label is sometimes contextual (the body targets another package), and a mislabeled issue must not pull cross-package work into the phase.
+When the sweep exposes doc/tracker drift in prose outside the roadmap sections (e.g. a stale "remaining open issues" claim), fix it in the roadmap commit rather than leaving it for the next reader.
 Track repeat deferrals: an issue swept as out-of-scope across multiple consecutive phases (check the prior phase retros/roadmaps) gets an explicit decision this phase — schedule it, or recommend closing it as not-planned — never a silent re-defer.
-Surface each repeat-deferral as an explicit `ask_user` decision (schedule / defer-with-recorded-rationale / close as not-planned), not a self-made call — these are preference-sensitive judgments the user should own.
+Surface each repeat-deferral as an explicit `ask_user` decision (schedule / defer-with-recorded-rationale / close as not-planned), not a self-made call — these are preference-sensitive judgments the user should own; bundle them into the Step 8 composition `ask_user`, not separate round-trips.
 
 ### Step 3: Run fallow for corroboration and baseline
 
@@ -84,6 +89,9 @@ Read `packages/$1/src/index.ts` and trace its dependency graph:
 - Note size, exports, fan-out, code smells
 - Pay special attention to: `as any` casts, adapter closure density, forward references, wide parameter lists, mixed responsibilities, anemic domain objects (data classes that a manager reaches into instead of telling), repeated discriminators (the same comparison re-evaluated across modules instead of decided once at a boundary)
 
+Scale the trace to the package's maturity: on a package with an extensive phase history, an exhaustive per-import read mostly re-derives what the architecture doc already records.
+Trace selectively instead — the hypothesis's target files, the churn hotspots, and any file the issue sweep implicates — and spot-verify the doc's claims rather than re-reading every module.
+
 ### Step 5: Read the tests as evidence of constructibility — and dispatch the craftsmanship scout
 
 `fallow`'s metrics miss god objects, closure density, and DIP violations.
@@ -95,17 +103,12 @@ When the analysis touches handler wiring or shared interfaces, load the `design-
 Counting `as unknown as` / `vi.mock` occurrences is not reading them — a documented failure mode of this prompt (an 880-line test body reads as "low cast count" and sails through).
 The micro lens (test-design quality as a first-class artifact — Category G — plus method-level SOLID, naming, stepdown, and comment quality) is expensive in context, so dispatch it to a subagent:
 
-- Dispatch the `craftsmanship-scout` subagent via the `subagent` tool: `subagent_type: "craftsmanship-scout"`, `description: "Craftsmanship scout for <PKG>"`, and a `prompt` naming the package, the largest test files (from the `fallow health` large-functions list), and the churn hotspots.
+- Dispatch the `craftsmanship-scout` subagent via the `subagent` tool: `subagent_type: "craftsmanship-scout"`, `description: "Craftsmanship scout for <PKG>"`, and a `prompt` naming the package, the largest test files (from the `fallow health` large-functions list; when that list is empty — common on a mature package — fall back to the largest test files by `wc -l`), and the churn hotspots.
 - Hand it the fallow large-function flags for test files and ask it to **adjudicate each one** — fallow counts a whole top-level `describe` callback as one function, so a flagged "giant test" may be a healthy nested tree of small behavior-named tests.
   A refuted flag is as valuable as found debt: it prevents a phase step manufactured from a false positive.
 - It **opens** the largest test files (not greps) and returns a **scored debt inventory**, flagging each cluster **concentrated** (a hot area worth a step) vs. **scattered** (defer).
   Fold that inventory into your findings; its concentrated/scattered split drives the Step 8 deferral gate.
 - The scout is read-only and its context stays in the subagent — your context stays clear for the plan.
-
-> **Calibration checkpoint (added 2026-07-13; run 1 passed 2026-07-15).**
-> Until **two consecutive** planning runs have calibrated cleanly, spot-check the scout: open one file it flags **concentrated** and one it flags **scattered** (or, when a class is absent, one of its fallow-flag adjudications) and confirm the calls match your own read before letting the split drive the Step 8 deferral gate — an over-clustering scout invents craftsmanship phases; an under-clustering one hides real debt.
-> Run 1 (pi-permission-system Phase 12, 2026-07-15): all spot-checked calls matched, including refuting two fallow "giant test function" false positives.
-> If a run's calls are off, recalibrate `.pi/agents/craftsmanship-scout.md` (Step 3) and reset the count; after the second consecutive clean run, remove this callout.
 
 ### Step 6: Assess file and directory organization against the domain
 
@@ -127,7 +130,7 @@ When the full reorg exceeds the current phase, record a **forward-looking direct
 
 ### Step 7: Apply the smell taxonomy
 
-For each finding, classify it using the taxonomy from the `improvement-discovery` skill (Category A–E).
+For each finding, classify it using the taxonomy from the `improvement-discovery` skill (Category A–G).
 Score each on Impact (1–5) and Risk (1–5).
 Compute Priority = Impact × (6 − Risk).
 
@@ -149,8 +152,17 @@ This is deliberately **not** a numeric threshold — the priority score ranks fi
 The honest framing ("discovery yielded only scattered polish" vs. "concentrated debt in a hot file") is the point; do not manufacture a full phase to fill the ceiling, and do not dismiss concentrated craftsmanship debt as unworthy of one.
 When the architecture doc's declared target is complete _and_ the scout finds only scattered trivia, the fired gate is the improvement process reaching its intended terminal state — report it as success, not as a failure to find work; the next phase's trigger is a new cause (including concentrated craftsmanship debt), not the calendar.
 
+A bug whose fix is structural (a boundary flaw with user-visible behavior, adopted from the tracker or found in discovery) is a legitimate phase step — even the spine.
+Note the commit type on such a step: a `fix:` (or unhidden `docs:`) step is the phase's release vehicle, while `refactor:`/`test:` steps are hidden changelog types — derive the `Release batches` framing from that mix rather than assuming a refactor-only phase.
+
+**Trajectory check.**
+Compare this phase's maximum priority score against the prior one or two phases (their history files record the scores).
+When the maximum declines across consecutive phases and the churn hotspots are cooling, state the trend in the roadmap summary and put the cadence question to the user: keep the regular improvement rotation, or move the package to trigger-driven planning (a new bug cluster, a feature's structural needs, concentrated debt).
+The deferral gate decides whether _this_ phase exists; the trajectory decides whether the _rotation_ continues.
+
 **Track composition.**
 When the surviving candidates span multiple independent tracks (a spine plus unrelated parallel work), offer the composition to the user via `ask_user` (a multi-select over the tracks) rather than committing to a fixed set — track selection is preference-sensitive (scope vs. focus), and the user may want to drop or add a track before you draft the steps.
+Bundle the first `ask_user`: the declared candidate, the track composition, the repeat-deferral dispositions, and (when the trajectory check fires) the cadence question belong in one call — one round-trip, not four.
 
 **Feasibility probe.**
 Before committing any step whose outcome claim depends on the SDK/type surface (e.g. "remove the file-level `eslint-disable` once the SDK exports usable types"), confirm the named type or export actually exists in the real surface (SDK `.d.ts`, `--help`, schema).
@@ -159,14 +171,15 @@ For an SDK **UI or behavioral** capability (not just "does this method exist"), 
 
 ## Output
 
-Write the proposed plan as a new `## Improvement roadmap — Phase N: <title>` section in `packages/$1/docs/architecture/architecture.md`, inserted **above the most recent completed-phase summary**.
-`/finish-phase` has already condensed prior phases into a chain of `## Improvement roadmap — Phase N−1: … (complete)` summaries; insert above them, do not overwrite them.
+Write the proposed plan as a new `## Improvement roadmap — Phase N: <title>` section in `packages/$1/docs/architecture/architecture.md`, inserted **immediately above the `## Refactoring history` section**.
+`/finish-phase` archives prior phases to `history/` and leaves only their "Refactoring history" table rows — there is no completed-phase summary chain to sit above, so the active roadmap you are writing is the only `## Improvement roadmap` section in the doc while it is in progress.
 
 The section should include:
 
 1. A summary of findings (updated health metrics table).
    Prefer cause-level metrics recomputable by a single command (a `grep -c`, `wc -l`, or fallow field) and record the recompute command with the metric, so `/finish-phase` can verify delivered vs. predicted deterministically.
    When a metric greps for a symbol or filename the phase has not created yet (a predicted name), the step whose work creates it must either use the roadmap's name or update the metric row in the same commit — note this on that step, or a rename silently breaks `/finish-phase`'s recompute.
+   Run each recompute command before committing and confirm it reproduces the stated baseline — a wrong command silently breaks `/finish-phase`'s delivered-vs-predicted verification.
 2. Numbered steps with:
    - Title
    - **Cause** — the first-principles structural cause the step dissolves, named explicitly; a fallow signal is cited as the _symptom_ of that cause, never as the step's motivation (a step justified only by a fallow finding is symptom-driven — trace it to a cause or drop it).
@@ -194,7 +207,9 @@ git push
 The roadmap is not done until each step has a GitHub issue and the document links back to it.
 After the plan is committed, ask whether to file the issues now; if confirmed:
 
-1. Load the `github-voice` skill, then file the issues **one `gh issue create --label "enhancement,pkg:$1"` call per issue**, with the title and `--body-file` paired literally in the same command — never via shell-array index arithmetic (the shell is zsh; its 1-indexed arrays silently shift titles relative to bodies).
+1. Steps adopted from already-filed issues need no new issue — skip creation and link the existing number; file only the steps without one.
+   Load the `github-voice` skill, then file the issues **one `gh issue create --label "enhancement,pkg:$1"` call per issue**, with the title and `--body-file` paired literally in the same command — never via shell-array index arithmetic (the shell is zsh; its 1-indexed arrays silently shift titles relative to bodies).
+   A `bug`-typed step keeps the `bug` label instead of `enhancement`.
    Run `gh` from the repo root (it must execute inside the repository).
    Use the repo's `## What` / `## Why` / `## Proposed change` / `## Context` sections, referencing cross-step dependencies as "Phase N Step M" prose, not hardcoded numbers (the issue numbers are not known until filed).
 2. Verify each created issue's title matches its body before continuing.

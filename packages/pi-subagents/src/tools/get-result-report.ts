@@ -24,8 +24,12 @@ export interface AgentReport {
 	description: string;
 	result: string | undefined;
 	error: string | undefined;
+	/** Whether the agent was stopped before the limiter ever admitted it. */
+	stoppedWhileQueued: boolean;
 	/** Present only when verbose was requested and a conversation is available. */
 	conversation?: string;
+	/** Persisted transcript path; rendered as a pointer so the parent can read it directly. */
+	transcriptPath?: string;
 }
 
 /** Assemble the stats parts: Tool uses / tokens? / Context? / Compactions? / Duration. */
@@ -43,6 +47,8 @@ export function renderReportBody(report: AgentReport): string {
 	if (report.status === "running")
 		return "Agent is still running. Use wait: true or check back later.";
 	if (report.status === "error") return `Error: ${report.error}`;
+	if (report.stoppedWhileQueued)
+		return "Agent was stopped while queued and never started. No work was performed.";
 	return report.result?.trim() ?? "No output.";
 }
 
@@ -55,6 +61,9 @@ export function formatAgentReport(report: AgentReport): string {
 	output += renderReportBody(report);
 	if (report.conversation) {
 		output += `\n\n--- Agent Conversation ---\n${report.conversation}`;
+	}
+	if (report.transcriptPath) {
+		output += `\n\nFull transcript available at: ${report.transcriptPath}`;
 	}
 	return output;
 }

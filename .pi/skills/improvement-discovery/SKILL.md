@@ -23,12 +23,14 @@ Load `docs/architecture/architecture.md` for the current domain model, health me
 Check which bags/hotspots have already been addressed vs. remain open.
 Before touching any tool, write down a **cause hypothesis** — the first-principles structural problem the next phase should dissolve (structural fusion, a coupling/boundary flaw, a dead subsystem).
 The later steps corroborate, refine, or refute it.
-A cause-level finding must trace to a named target concept in the architecture doc's first-principles section (the pattern: pi-permission-system's "Target: the authority model").
+The prior phase's history file carries candidates beyond any explicit "leading candidate" line: a ⚠️ metric miss in its health-metrics table and any in-step "deferred" remark are implicit candidates, and each metric miss gets an explicit disposition in the new roadmap (re-target / accept with rationale / supersede) — never a silent drop.
+A cause-level finding must trace to a named target concept in the architecture doc's first-principles section (the pattern: pi-permission-system's "The authority model").
 When no such section exists, writing one — naming the organizing concept and recording resolved design directions — is itself a phase deliverable, not an emergent artifact: settled-in-writing directions are what make the next phase's plan cheap.
 
 ### 2. Sweep open issues
 
 Run `gh issue list --label "pkg:<PKG>" --state open` and cross-check it against the architecture doc's claims about which issues remain open — doc/tracker drift otherwise causes re-planning filed work or missing a parked candidate.
+An open issue that already names a cause-level finding is a pre-discovered candidate — adopt it as a phase step under its existing number rather than re-deriving it; read each labeled issue's body first, since a package label is sometimes contextual and the real work targets another package.
 Track repeat deferrals: an issue swept as out-of-scope across multiple consecutive phases gets an explicit decision this phase — schedule it into the phase, or recommend closing it as not-planned — never a silent re-defer.
 Structural phases must not starve feature and bug work indefinitely.
 
@@ -43,7 +45,7 @@ pnpm fallow dead-code --workspace @gotgenes/<PKG> 2>&1 || true
 pnpm fallow dupes --workspace @gotgenes/<PKG> 2>&1 || true
 ```
 
-Capture: health score, dead exports, duplication (production vs. test), hotspots, refactoring targets.
+Capture: health score, dead exports, production duplication (`fallow dupes` excludes test files by default), hotspots, refactoring targets.
 
 Fallow is blind to repeated discriminators — scattered one-line conditionals never form a token-run clone — so sweep for them alongside it:
 
@@ -70,6 +72,8 @@ For each imported module, note:
 - Number and width of exports
 - How deep it goes (fan-out)
 - Whether it's a pure function, stateful class, or adapter
+
+Scale the trace to the package's maturity: on a package with an extensive phase history, trace selectively (hypothesis targets, churn hotspots, files the issue sweep implicates) and spot-verify the architecture doc's claims — an exhaustive per-import read re-derives what the doc already records.
 
 ### 5. Identify smells using the taxonomy below
 
@@ -131,13 +135,13 @@ They are ordered from most impactful (structural) to least (cosmetic).
 
 ### Category D: Testability
 
-| Signal                      | Evidence                                 | Typical fix                               |
-| --------------------------- | ---------------------------------------- | ----------------------------------------- |
-| `vi.mock()` at module level | Module-level mocking in test files       | Inject dependency via IO interface        |
-| `as any` casts in tests     | Constructing wide mocks for narrow usage | Narrow the interface the code depends on  |
-| Test duplication (high)     | fallow dupes in test/                    | Extract shared fixtures or test factories |
-| Shared factory complexity   | Factory needs its own unit tests         | Narrow the production interface (ISP)     |
-| Untestable pure logic       | Logic embedded in stateful class         | Extract as pure function                  |
+| Signal                      | Evidence                                                                                  | Typical fix                                                        |
+| --------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `vi.mock()` at module level | Module-level mocking in test files                                                        | Inject dependency via IO interface                                 |
+| `as any` casts in tests     | Constructing wide mocks for narrow usage                                                  | Narrow the interface the code depends on                           |
+| Test duplication (high)     | `craftsmanship-scout` reads test files (`fallow dupes` excludes `**/*.test.*` by default) | Extract shared fixtures or test factories (never wrap the SUT act) |
+| Shared factory complexity   | Factory needs its own unit tests                                                          | Narrow the production interface (ISP)                              |
+| Untestable pure logic       | Logic embedded in stateful class                                                          | Extract as pure function                                           |
 
 ### Category E: Naming and organization
 
@@ -238,6 +242,7 @@ The plan should produce:
 
    Agents locate the data by grepping for the `Release:` line (per step) and the `Release batches` heading (per phase) — never by parsing prose.
    A step with no `Release:` tag defaults to independently releasable.
+   A phase may mix commit types: a `fix:` (or unhidden `docs:`) step is the phase's release vehicle, while `refactor:`/`test:` steps are hidden changelog types that cut no release on their own — name the release vehicle in the `Release batches` subsection instead of assuming a refactor-only phase.
 
 ## Lessons from prior phases
 

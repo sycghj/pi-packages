@@ -22,7 +22,7 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { piAvailable, runRpcSession } from "./helpers/rpc";
+import { piAvailable, rpcVitestTimeoutMs, runRpcSession } from "./helpers/rpc";
 
 const describeIfPi = piAvailable ? describe : describe.skip;
 
@@ -39,25 +39,29 @@ describeIfPi("acceptance: extension loads under real pi CLI", () => {
     }
   });
 
-  it("loads the extension and answers an rpc get_state command", async () => {
-    const { responses, stderr, exitCode } = await runRpcSession({
-      cwd: workDir,
-      commands: [{ id: "1", type: "get_state" }],
-    });
+  it(
+    "loads the extension and answers an rpc get_state command",
+    async () => {
+      const { responses, stderr, exitCode } = await runRpcSession({
+        cwd: workDir,
+        commands: [{ id: "1", type: "get_state" }],
+      });
 
-    // Pi must exit cleanly after stdin closes.
-    expect(exitCode).toBe(0);
+      // Pi must exit cleanly after stdin closes.
+      expect(exitCode).toBe(0);
 
-    // No "Extension load error" or stack trace from our entrypoint should
-    // appear on stderr. We allow Pi's own informational lines to pass.
-    expect(stderr).not.toMatch(/pi-autoformat/i);
-    expect(stderr).not.toMatch(/Extension .* error/i);
+      // No "Extension load error" or stack trace from our entrypoint should
+      // appear on stderr. We allow Pi's own informational lines to pass.
+      expect(stderr).not.toMatch(/pi-autoformat/i);
+      expect(stderr).not.toMatch(/Extension .* error/i);
 
-    const stateResponse = responses.find((r) => r.id === "1");
-    expect(stateResponse).toBeDefined();
-    expect(stateResponse?.success).toBe(true);
-    expect(stateResponse?.command).toBe("get_state");
-  }, 15_000);
+      const stateResponse = responses.find((r) => r.id === "1");
+      expect(stateResponse).toBeDefined();
+      expect(stateResponse?.success).toBe(true);
+      expect(stateResponse?.command).toBe("get_state");
+    },
+    rpcVitestTimeoutMs(),
+  );
 });
 
 if (!piAvailable) {

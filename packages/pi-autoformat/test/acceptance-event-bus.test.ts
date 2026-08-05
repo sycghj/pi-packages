@@ -29,7 +29,7 @@ import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { piAvailable, runRpcSession } from "./helpers/rpc";
+import { piAvailable, rpcVitestTimeoutMs, runRpcSession } from "./helpers/rpc";
 
 const FIXTURE_EXTENSION = resolve(
   __dirname,
@@ -104,29 +104,32 @@ describeIfPi("acceptance: autoformat:touched event bus", () => {
     }
   });
 
-  it("runs the configured formatter on paths emitted via pi.events", async () => {
-    const targetPath = join(workDir, "out.ts");
+  it(
+    "runs the configured formatter on paths emitted via pi.events",
+    async () => {
+      const targetPath = join(workDir, "out.ts");
 
-    const { exitCode, stderr, responses } = await runRpcSession({
-      cwd: workDir,
-      extraExtensions: [FIXTURE_EXTENSION],
-      commands: [
-        { id: "1", type: "prompt", message: `/emit-touched ${targetPath}` },
-      ],
-      timeoutMs: 15_000,
-    });
+      const { exitCode, stderr, responses } = await runRpcSession({
+        cwd: workDir,
+        extraExtensions: [FIXTURE_EXTENSION],
+        commands: [
+          { id: "1", type: "prompt", message: `/emit-touched ${targetPath}` },
+        ],
+      });
 
-    expect(exitCode).toBe(0);
-    expect(stderr).not.toMatch(/Extension .* error/i);
+      expect(exitCode).toBe(0);
+      expect(stderr).not.toMatch(/Extension .* error/i);
 
-    const promptResponse = responses.find((r) => r.id === "1");
-    expect(promptResponse?.success).toBe(true);
+      const promptResponse = responses.find((r) => r.id === "1");
+      expect(promptResponse?.success).toBe(true);
 
-    const entries = readRecorderLog(logPath);
-    expect(entries).toHaveLength(1);
-    expect(entries[0].argv).toEqual([targetPath]);
-    expect(entries[0].cwd).toBe(workDir);
-  }, 20_000);
+      const entries = readRecorderLog(logPath);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].argv).toEqual([targetPath]);
+      expect(entries[0].cwd).toBe(workDir);
+    },
+    rpcVitestTimeoutMs(),
+  );
 });
 
 if (!piAvailable) {

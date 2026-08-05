@@ -4,35 +4,11 @@ import {
   EXTENSION_ID,
   type PermissionSystemExtensionConfig,
 } from "./extension-config";
-
-export function safeJsonStringify(value: unknown): string | undefined {
-  const seen = new WeakSet<object>();
-  return JSON.stringify(value, (_key, currentValue) => {
-    if (currentValue instanceof Error) {
-      return {
-        name: currentValue.name,
-        message: currentValue.message,
-        stack: currentValue.stack,
-      };
-    }
-
-    if (typeof currentValue === "bigint") {
-      return currentValue.toString();
-    }
-
-    if (typeof currentValue === "object" && currentValue !== null) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- JSON.stringify replacer receives any; currentValue is narrowed to object here
-      if (seen.has(currentValue)) {
-        return "[Circular]";
-      }
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- same as above
-      seen.add(currentValue);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- JSON.stringify replacer must return any
-    return currentValue;
-  });
-}
+import {
+  OWNER_ONLY_FILE_MODE,
+  restrictExistingPathToOwner,
+} from "./log-file-permissions";
+import { redactedJsonStringify } from "./log-redaction";
 
 export interface PermissionSystemLogger {
   debug: (
@@ -56,6 +32,10 @@ export function createPermissionSystemLogger(
   options: PermissionSystemLoggerOptions,
 ): PermissionSystemLogger {
   const { debugLogPath, reviewLogPath, ensureLogsDirectory } = options;
+  // Per-session, so a log inherited from an earlier version is tightened once
+  // rather than on every line. Lives in the closure because the factory is
+  // re-invoked per session, unlike module scope, which now outlives one.
+  const hardened = new Set<string>();
 
   const writeLine = (
     stream: "debug" | "review",
@@ -69,7 +49,7 @@ export function createPermissionSystemLogger(
     }
 
     try {
-      const line = safeJsonStringify({
+      const line = redactedJsonStringify({
         timestamp: new Date().toISOString(),
         extension: EXTENSION_ID,
         stream,
@@ -79,7 +59,14 @@ export function createPermissionSystemLogger(
       if (!line) {
         return `Failed to write permission-system ${stream} log '${path}': event could not be serialized.`;
       }
-      appendFileSync(path, `${line}\n`, "utf-8");
+      appendFileSync(path, `${line}\n`, {
+        encoding: "utf-8",
+        mode: OWNER_ONLY_FILE_MODE,
+      });
+      if (!hardened.has(path)) {
+        hardened.add(path);
+        restrictExistingPathToOwner(path, OWNER_ONLY_FILE_MODE);
+      }
       return undefined;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

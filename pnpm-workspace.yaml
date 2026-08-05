@@ -41,4 +41,13 @@ minimumReleaseAgeExclude:
   - '@fallow-cli/win32-arm64-msvc@3.2.0'
   - '@fallow-cli/win32-x64-msvc@3.2.0'
   - fallow@3.2.0
-  - '@gotgenes/pi-subagents@16.4.0'
+
+# A freshly-published first-party sibling (e.g. a same-day @gotgenes/* release a
+# dependent package bumps to) cannot be unblocked via minimumReleaseAgeExclude:
+# that list is honored during dependency resolution but NOT during pnpm's
+# lockfile supply-chain verification pass, which re-applies minimumReleaseAge to
+# every pinned lockfile entry and fails CI's frozen install. trustLockfile
+# treats the committed, PR-reviewed lockfile as trusted and skips that
+# re-verification, so a same-day sibling release installs immediately; the age
+# delay still applies to fresh `pnpm add`/`update` resolutions.
+trustLockfile: true

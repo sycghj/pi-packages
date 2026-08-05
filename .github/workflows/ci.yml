@@ -37,6 +37,12 @@ jobs:
       - name: Test
         run: pnpm -r run test
 
+      # Runs on its own, after the concurrent workspace suite. These tests spawn
+      # the real `pi` CLI, and doing so alongside eight other packages' vitest
+      # processes is what made them flake (#678).
+      - name: Real-CLI acceptance tests (pi-autoformat)
+        run: pnpm --filter @gotgenes/pi-autoformat run test:acceptance
+
       - name: Fallow audit
         if: github.event_name == 'pull_request'
         run: pnpm fallow audit --base origin/${{ github.base_ref }}

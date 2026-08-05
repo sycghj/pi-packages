@@ -11,6 +11,12 @@ One unified config file per scope:
 
 Project config overrides global config; per-agent frontmatter overrides both.
 
+**Project config requires project trust.**
+Project and project-agent scopes (both permission policy and runtime config such as `yoloMode`) are loaded only when Pi reports the project as trusted (`ctx.isProjectTrusted()`).
+In an untrusted directory, only global (and global-agent) config applies, so an untrusted repository cannot loosen your global policy; the extension surfaces a loud warning plus a `project_trust.skipped` review-log entry when it skips a project scope.
+Grant project trust (or configure `defaultProjectTrust`) to load the project's config; a trust grant reloads project policy on the next `resources_discover` reload.
+See [migration/0644-project-trust-gating.md](migration/0644-project-trust-gating.md).
+
 > **Coming from OpenCode?**
 > This extension's permission model was inspired by OpenCode's.
 > See [OpenCode Compatibility](opencode-compatibility.md) for shared concepts, divergences, and a porting guide.
@@ -32,6 +38,14 @@ Project config overrides global config; per-agent frontmatter overrides both.
 The `permission` object uses deep-shallow merge: string-vs-string replaces; both-object shallow-merges pattern maps; string-vs-object the override wins entirely.
 Scalar fields (`debugLog`, `permissionReviewLog`, `yoloMode`, `doublePressToConfirm`) use simple replacement.
 
+**Invalid higher-precedence scope fails closed.**
+If a non-global scope (project config, global agent frontmatter, or project agent frontmatter) is present but fails to load or validate, it no longer contributes an empty scope that silently inherits the lower scope's rules.
+Instead the effective policy is floored so nothing resolves more permissively than `ask`: every `allow` (including one inherited from a lower scope) is clamped to `ask`, while `deny` and `ask` are unchanged.
+So a global `bash: allow` cannot remain effective behind a project scope that was meant to deny bash but contains a typo — bash prompts until the invalid config is fixed.
+A validation warning plus a distinct fail-closed notice are emitted, and a fix + reload restores the intended policy.
+An invalid **global** scope does not trigger the clamp — it is the lowest precedence, so nothing more permissive is inherited when it fails.
+This clamp is deny-preserving and, like `yoloMode`, applied at composition; when `yoloMode` is on it re-permits the floored `ask` back to `allow`, since yolo is an explicit full-permissive opt-in.
+
 ## Full Example
 
 ```jsonc
@@ -51,6 +65,9 @@ Scalar fields (`debugLog`, `permissionReviewLog`, `yoloMode`, `doublePressToConf
   "shellTools": {
     "exec_command": { "commandArgument": "cmd", "workdirArgument": "workdir" }
   },
+
+  // Ordered names of registered live-authority chain links (empty = none)
+  "authorizerChain": [],
 
   // Flat permission policy
   "permission": {
@@ -81,15 +98,16 @@ Scalar fields (`debugLog`, `permissionReviewLog`, `yoloMode`, `doublePressToConf
 
 ## Runtime Knobs
 
-| Key                         | Default | Description                                                                                                                                          |
-| --------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `debugLog`                  | `false` | Enables verbose diagnostic logging to `logs/pi-permission-system-debug.jsonl`                                                                        |
-| `permissionReviewLog`       | `true`  | Enables the permission request/denial review log at `logs/pi-permission-system-permission-review.jsonl`                                              |
-| `yoloMode`                  | `false` | Auto-approves `ask` results instead of prompting when yolo mode is enabled                                                                           |
-| `doublePressToConfirm`      | `true`  | Requires a confirming second press of a decision hotkey in the inline TUI dialog (see below). TUI sessions only; set to `false` for single-press.    |
-| `toolInputPreviewMaxLength` | `200`   | Max characters of inline JSON shown in permission prompts for tool inputs. Omit to use the default. Set to a large value to disable truncation.      |
-| `toolTextSummaryMaxLength`  | `80`    | Max characters of inline pattern/path summaries (grep patterns, find globs, ls paths) in permission prompts. Omit to use the default.                |
-| `piInfrastructureReadPaths` | `[]`    | Extra directories to auto-allow for reads, bypassing the `external_directory` gate. Supports `~`/`$HOME` expansion and wildcard patterns (`*`, `?`). |
+| Key                         | Default | Description                                                                                                                                                                                        |
+| --------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `debugLog`                  | `false` | Enables verbose diagnostic logging to `logs/pi-permission-system-debug.jsonl`                                                                                                                      |
+| `permissionReviewLog`       | `true`  | Enables the permission request/denial review log at `logs/pi-permission-system-permission-review.jsonl`. Records bash command strings verbatim — see [Log file sensitivity](#log-file-sensitivity) |
+| `yoloMode`                  | `false` | Auto-approves `ask` results instead of prompting when yolo mode is enabled                                                                                                                         |
+| `doublePressToConfirm`      | `true`  | Requires a confirming second press of a decision hotkey in the inline TUI dialog (see below). TUI sessions only; set to `false` for single-press.                                                  |
+| `toolInputPreviewMaxLength` | `200`   | Max characters of inline JSON shown in permission prompts for tool inputs. Omit to use the default. Set to a large value to disable truncation.                                                    |
+| `toolTextSummaryMaxLength`  | `80`    | Max characters of inline pattern/path summaries (grep patterns, find globs, ls paths) in permission prompts. Omit to use the default.                                                              |
+| `piInfrastructureReadPaths` | `[]`    | Extra directories to auto-allow for reads, bypassing the `external_directory` gate. Supports `~`/`$HOME` expansion and wildcard patterns (`*`, `?`).                                               |
+| `authorizerChain`           | `[]`    | Ordered names of registered live-authority chain links to consult before the terminal authorizer (see [Authorizer chain](#authorizer-chain--case-by-case-decision-links)).                         |
 
 Both logs write to `~/.pi/agent/extensions/pi-permission-system/logs/`.
 No debug output is printed to the terminal.
@@ -108,6 +126,10 @@ In an interactive **TUI** session, an `ask` decision opens an inline keybind dia
 Arrow keys / `j`/`k` move the highlight, `enter` confirms the highlighted option, and `esc` denies.
 With `doublePressToConfirm` enabled (the default), a letter hotkey **arms** its action and shows a `Press y again to approve.` hint; press the same key again to commit.
 Set `doublePressToConfirm` to `false` to commit on the first press.
+
+Pi's tool-expansion binding (`app.tools.expand`, `Ctrl+O` by default) stays live while the dialog is open, so you can expand a truncated tool preview before deciding.
+It only toggles the display — it never resolves, commits, or arms the pending decision.
+While you are typing a denial reason it is not intercepted, so a rebound printable key still reaches the reason editor.
 
 Non-TUI contexts (RPC / frontend-driven sessions) keep the single-select prompt and are unaffected by `doublePressToConfirm`.
 
@@ -158,6 +180,83 @@ To change a specific tool's mapping, set that tool's key at the project scope (t
 
 `shellTools` only ever *tightens* enforcement and is inert when the named tool is not registered in the current session.
 Opting a project out of a shell-aliasing extension is a package-disable concern, not a `shellTools` edit.
+
+### Authorizer chain — case-by-case decision links
+
+The deterministic policy above decides `allow` / `deny` / `ask` for every request.
+When a request lands on `ask`, the **authorizer chain** decides who answers it.
+By default that is you (an interactive prompt), the subagent-forwarding path, or a headless deny.
+A downstream extension can register a **link** — a reviewer that sees the `ask` and returns `allow`, `deny` (with an optional teaching reason), or `defer` to the next link — and the chain ends at the default terminal that always decides.
+The canonical use case is a light model judge that reviews asks case by case (e.g. auto-denying an errant typo-path with a corrective reason).
+
+`authorizerChain` is the ordered list of link names to consult, ahead of the terminal:
+
+```jsonc
+{
+  "authorizerChain": ["model-judge"]
+}
+```
+
+Three invariants govern the chain:
+
+1. **Config order wins, never registration order.**
+   The order in `authorizerChain` — not the order extensions happen to register in — fixes the security-relevant chain order.
+2. **A missing link is skipped fail-safe.**
+   A name with no registered link is skipped with a logged warning; the `ask` still reaches the terminal.
+   Absence of a judge means *more* prompting, never less.
+3. **Registration alone grants no authority.**
+   Installing a judge extension gives it nothing; a link decides nothing until you name it here (opt-in activation).
+
+The chain owner caps every link with a **bounded-delegation checkpoint**: a link's `allow` on an excluded surface (`external_directory` or the `path` surface) is downgraded to `defer`, so a buggy or over-eager judge can never approve access outside your policy.
+Deny and defer are never capped.
+The excluded surface is the **gate** surface the rule fired on, not the tool name displayed in the prompt — so a `write` blocked by a `path` rule is capped.
+This holds for an ask forwarded up from a subagent exactly as it does for a local one.
+See [migration/0635-forwarded-ask-delegation-envelope.md](migration/0635-forwarded-ask-delegation-envelope.md).
+
+Extension authors: register a link from a `permissions:ready` handler via `getPermissionsService().registerAuthorizer(name, authorize)`; the callback receives the ask details and a narrow, session-scoped `PermissionQuery` (`checkPermission` / `getToolPermission`) so it can consult the deterministic engine at gate parity.
+Registration returns a disposer, and only one link may hold a given name.
+For a complete working example, see [`@gotgenes/pi-permission-model-judge`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-model-judge): it registers a `model-judge` link on `permissions:ready` that reviews `external_directory` asks and auto-denies mistyped paths with a corrective reason.
+
+---
+
+### autoMode — LLM classifier for `ask` decisions
+
+While the authorizer chain routes an `ask` to a registered reviewer, **`autoMode`** takes a different path: it runs an LLM classifier on the `ask` before the UI prompt appears, and may auto-allow, auto-deny, or abstain back to the prompt.
+
+**Deterministic `allow` and `deny` bypass the classifier entirely** — tool safety, path safety, extension-tool extraction, and hard denials remain policy-driven by this permission system rather than by a hardcoded tool allowlist.
+
+`autoMode` is **disabled by default**. Enable it only in user/global config; a project config must not enable it (project config can only tighten, never loosen).
+
+```jsonc
+{
+  "autoMode": {
+    "enabled": true,
+    "provider": "anthropic",
+    "modelId": "claude-sonnet-4-5",
+    "maxTokens": 256,
+    "maxRetries": 2,
+    "fallback": "ask",
+    "twoStage": { "enabled": false, "thinkingBudgetTokens": 1024 }
+  }
+}
+```
+
+Fields:
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `enabled` | `false` | Off by default. Only user/global config may set `true`. |
+| `provider` | — | LLM provider id (e.g. `anthropic`). |
+| `modelId` | — | Model id for the classifier. |
+| `maxTokens` | — | Max tokens for the classifier response. |
+| `maxRetries` | — | Retry count on transient failure. |
+| `fallback` | `"ask"` | What happens when the classifier fails or abstains: `"ask"` (recommended, returns to the prompt) or `"deny"`. |
+| `twoStage.enabled` | `false` | Opt-in thinking-review second stage on a deny or malformed first-stage output. |
+| `twoStage.thinkingBudgetTokens` | — | Thinking budget for the second stage. |
+
+**Safety floor:** high-risk matched patterns are marked `classifierApprovable: false` and never reach the classifier — they fall straight to the prompt (or deny per `fallback`).
+
+A full commented example lives in [`config/config.autoMode.example.jsonc`](../config/config.autoMode.example.jsonc).
 
 ---
 
@@ -418,8 +517,12 @@ For bash commands, the extension extracts path-candidate tokens from the command
 The most restrictive result across all tokens determines the outcome.
 When the current working directory is known, relative bash tokens are matched with cwd-normalized policy values, resolved against the effective directory after literal `cd` commands; a token after a non-literal `cd` (e.g. `cd "$DIR"`) stays conservative and matches only its literal form.
 
-A bare filename with no path shape at all (e.g. `id_rsa` in `cat id_rsa`) is also gated when it matches an active, specific (non-`*`) `path` deny/ask rule — so `"id_rsa": "deny"` or `"*.pem": "deny"` blocks the file whether it is referenced by a bare name, a relative path, or the `read` tool.
-A bare token that matches no specific `path` rule (e.g. `status` in `git status`) is left alone, and this promotion never fires against a `"*"` catch-all — only a config that already declares a specific `path` rule is affected.
+A bare filename with no path shape at all (e.g. `id_rsa` in `cat id_rsa`) is also gated, provided it names a file that actually exists — so `"id_rsa": "deny"` or `"*.pem": "deny"` blocks the file whether it is referenced by a bare name, a relative path, or the `read` tool.
+Because the resolved path is matched, this covers a bare **symlink** whose target a rule names: with `".some.secret": "deny"`, `cat a_sym` is denied when `a_sym` points at `.some.secret`.
+A bare token that names nothing (e.g. `status` in `git status`, `build` in `npm run build`) is left alone, so ordinary subcommands and branch names never prompt.
+An existing file that matches no `path` rule is likewise left alone — the catch-all `"*"` entry alone does not gate it.
+
+A path embedded in a long option (e.g. `--file=/tmp/patterns` in `grep --file=/tmp/patterns target`) is extracted and gated like any other path token; an option value that is not path-shaped (e.g. `--format=json`) is ignored.
 
 On Windows, where a backslash is a path separator, a backslash-relative bash argument (e.g. `dir\file` in `cat dir\file`) is gated by a `path` rule the same as its forward-slash equivalent (`dir/file`) and the same as the file accessed through the `read` tool.
 On other platforms a backslash is a legal filename character, so such a token is not treated as a path.
@@ -563,15 +666,18 @@ Infrastructure directories include:
 Write tools (`write`, `edit`) to infrastructure paths are **not** auto-allowed and still go through the gate.
 
 On Windows, path matching for `external_directory`, `path`, and the path-bearing tools is case-insensitive and tolerant of either separator (`\` or `/`), matching the case-insensitive filesystem.
-A mixed-case allow override such as `~/AppData/Roaming/npm/node_modules/@earendil-works/pi-coding-agent/*` therefore matches a lowercased, backslash-normalized path value.
-POSIX matching remains case-sensitive.
+The separator folding applies to the rule pattern **and** to the value it is matched against, so either side may be written with either separator.
+A mixed-case allow override such as `~/AppData/Roaming/npm/node_modules/@earendil-works/pi-coding-agent/*` therefore matches a lowercased, backslash-normalized path value, and a forward-slash rule such as `"/dev/null"` matches a value that is also spelled with forward slashes.
+POSIX matching remains case-sensitive and does not fold separators.
 
 #### Git Bash / MSYS paths on Windows
 
 On Windows, Pi executes bash commands through Git Bash, so a bash token that looks like a POSIX absolute path carries MSYS mount semantics rather than native `node:path.win32` semantics.
 The `external_directory` and `path` gates interpret bash tokens accordingly (tool-input paths for `read`/`write`/`edit` keep native Windows semantics, since those tools resolve them through Node's filesystem):
 
-- The safe device paths (`/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`) are recognized as MSYS devices and never trigger the gate — the same exclusion that holds on POSIX, so `echo hi > /dev/null` does not prompt.
+- The safe device paths (`/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`) are recognized as MSYS devices rather than filesystem paths, so they never trigger the `external_directory` gate — the same exclusion that holds on POSIX.
+  The cross-cutting `path` surface still governs them on both platforms: if a `path` rule matches the token, it decides.
+  A device is therefore allow-listed the way any other path is, written as typed — `path: { "/dev/null": "allow" }`.
 - MSYS drive mounts (`/c/…`, `/d/…`) are translated to their Windows equivalent (`C:\…`), so a project file referenced through a mount is matched against its real Windows path and an in-CWD mount is not flagged.
 - Every other POSIX-absolute token (`/tmp/foo`, `/usr/bin`) has an install-dependent target this extension cannot resolve deterministically (Git Bash mounts `/tmp` to `%TEMP%`, MSYS2 to its own root), so it is treated as an external path matched and displayed exactly as typed, never rewritten to `C:\tmp\foo`.
 
@@ -845,7 +951,38 @@ Additional behaviors:
 - The narrowed prompt is recomputed and returned on every turn but is byte-stable for a stable policy/agent, so the provider's prompt cache (tools + system prefix) is preserved rather than rewritten each turn
 - Extension-provided tools like `task`, `mcp`, and third-party tools are handled by exact registered name
 - Generic extension-tool approval prompts include a bounded input preview; built-in file tools use concise human-readable summaries
-- Permission review logs include bounded `toolInputPreview` values for non-bash/non-MCP tool calls
+- Permission review logs include bounded `toolInputPreview` values for non-bash/non-MCP tool calls, with sensitive-keyed values masked (see [Log file sensitivity](#log-file-sensitivity))
+
+---
+
+## Log file sensitivity
+
+The review log is enabled by default and records what the agent actually did, which means it records payload as well as decisions: the complete bash command string for every bash decision, and a bounded JSON preview of the tool input for other tools.
+The debug log carries the same payload when `debugLog` is on.
+
+Two protections apply.
+
+Both logs are created **owner-only** (`0600`, in a `0700` directory), and a log created by an earlier version is tightened on the next write.
+The permission-forwarding request and response files are written the same way.
+This closes the shared-host case: another user on the same machine cannot read them.
+
+Values bound to a **sensitive key name** — `authorization`, `token`, `secret`, `password`, `credential`, `cookie`, `api_key`, `private_key`, matched case-insensitively — are masked as `[redacted]` before anything is written.
+So a tool called with `{"authorization": "Bearer …"}` records `{"authorization": "[redacted]"}`.
+
+The boundary is worth stating exactly, because it is easy to over-read:
+
+> A value bound to a sensitive key name is masked; a secret embedded in a bash command string is not.
+
+A command string has no keys, so `deploy --token abc123` is logged verbatim.
+The extension deliberately does not try to guess which parts of a command look secret-shaped — see [ADR 0010] for the measured reasoning.
+
+Practical guidance:
+
+- Treat both log files as sensitive when sharing them: scrub before pasting into an issue or a chat.
+- Set `"permissionReviewLog": false` (and leave `debugLog` off) for a session that will handle credentials on the command line.
+- Owner-only modes do not protect against anything running as you, including a backup or cloud-sync agent that copies your home directory.
+
+[ADR 0010]: https://github.com/gotgenes/pi-packages/blob/main/packages/pi-permission-system/docs/decisions/0010-permission-log-secret-exposure.md
 
 ---
 

@@ -19,7 +19,9 @@ function makeReport(overrides: Partial<AgentReport> = {}): AgentReport {
 		description: "Investigate the bug",
 		result: "All done.",
 		error: undefined,
+		stoppedWhileQueued: false,
 		conversation: undefined,
+		transcriptPath: undefined,
 		...overrides,
 	};
 }
@@ -81,6 +83,15 @@ describe("renderReportBody", () => {
 		const body = renderReportBody(makeReport({ status: "completed", result: undefined }));
 		expect(body).toBe("No output.");
 	});
+
+	it("says an agent stopped while queued never started, rather than showing no output", () => {
+		const body = renderReportBody(
+			makeReport({ status: "stopped", stoppedWhileQueued: true, result: undefined }),
+		);
+		expect(body).toBe(
+			"Agent was stopped while queued and never started. No work was performed.",
+		);
+	});
 });
 
 describe("formatAgentReport", () => {
@@ -117,5 +128,15 @@ describe("formatAgentReport", () => {
 	it("omits the conversation block when absent", () => {
 		const text = formatAgentReport(makeReport({ conversation: undefined }));
 		expect(text).not.toContain("--- Agent Conversation ---");
+	});
+
+	it("renders a transcript pointer line when transcriptPath is present", () => {
+		const text = formatAgentReport(makeReport({ transcriptPath: "/tasks/agent.jsonl" }));
+		expect(text).toContain("Full transcript available at: /tasks/agent.jsonl");
+	});
+
+	it("omits the transcript line when transcriptPath is absent", () => {
+		const text = formatAgentReport(makeReport({ transcriptPath: undefined }));
+		expect(text).not.toContain("Full transcript available at:");
 	});
 });

@@ -6,6 +6,7 @@ import {
 } from "#src/active-agent";
 import {
   type ForwarderContext,
+  getCwd,
   getSessionId,
 } from "#src/authority/forwarder-context";
 import {
@@ -20,6 +21,7 @@ import {
 } from "#src/authority/forwarding-io";
 import type { PermissionPromptDecision } from "#src/authority/permission-dialog";
 import {
+  type ForwardedAccessFacts,
   type ForwardedPermissionRequest,
   type ForwardedPromptDisplay,
   type ForwardedSessionApproval,
@@ -33,7 +35,7 @@ import type { SubagentSessionRegistry } from "#src/authority/subagent-registry";
 import { buildUiPrompt } from "#src/permission-ui-prompt";
 import type { DebugReviewLogger } from "#src/session-logger";
 import { toRecord } from "#src/value-guards";
-import type { Authorizer } from "./authorizer";
+import type { TerminalAuthorizer } from "./authorizer";
 import type { PromptPermissionDetails } from "./permission-prompter";
 
 // ── Module-private helpers ────────────────────────────────────────────────
@@ -61,6 +63,23 @@ function getContextSystemPrompt(ctx: ForwarderContext): string | undefined {
 
 // ── ParentAuthorizer ────────────────────────────────────────────────────
 
+/**
+ * The facts a forwarded request relays unchanged from the child's ask: the
+ * prompt message, the optional display projection, and the optional
+ * session-approval suggestion.
+ *
+ * Bundled into one object so the two-hop private chain
+ * (`waitForForwardedApproval` → `buildForwardedRequest`) threads a single
+ * relayed value instead of three positional optionals.
+ */
+interface ForwardedRequestFacts {
+  message: string;
+  display?: ForwardedPromptDisplay;
+  sessionApproval?: ForwardedSessionApproval;
+  /** The child-fixed access facts; the edge completes them into a `ForwardedAccessIntent`. */
+  accessIntent?: ForwardedAccessFacts;
+}
+
 /** Constructor config for {@link ParentAuthorizer}. */
 export interface ParentAuthorizerDeps {
   forwardingDir: string;
@@ -81,7 +100,7 @@ export interface ParentAuthorizerDeps {
  * (formerly `ApprovalEscalator.requestApproval`'s `hasUI` / `!isSubagent`
  * arms, both dead once every caller routes through `selectAuthorizer`).
  */
-export class ParentAuthorizer implements Authorizer {
+export class ParentAuthorizer implements TerminalAuthorizer {
   private readonly forwardingDir: string;
   private readonly registry: SubagentSessionRegistry | undefined;
   private readonly logger: DebugReviewLogger;
@@ -99,25 +118,23 @@ export class ParentAuthorizer implements Authorizer {
     details: PromptPermissionDetails,
   ): Promise<PermissionPromptDecision> {
     const uiPrompt = buildUiPrompt(details);
-    return this.waitForForwardedApproval(
-      this.ctx,
-      details.message,
-      {
+    return this.waitForForwardedApproval(this.ctx, {
+      message: details.message,
+      display: {
         source: uiPrompt.source,
         surface: uiPrompt.surface,
         value: uiPrompt.value,
       },
-      details.sessionApproval,
-    );
+      sessionApproval: details.sessionApproval,
+      accessIntent: details.accessIntent,
+    });
   }
 
   // ── Private methods ────────────────────────────────────────────────────
 
   private async waitForForwardedApproval(
     ctx: ForwarderContext,
-    message: string,
-    forwarded?: ForwardedPromptDisplay,
-    sessionApproval?: ForwardedSessionApproval,
+    facts: ForwardedRequestFacts,
   ): Promise<PermissionPromptDecision> {
     const requesterSessionId = getSessionId(ctx);
     const targetSessionId = resolvePermissionForwardingTargetSessionId({
@@ -159,11 +176,9 @@ export class ParentAuthorizer implements Authorizer {
 
     const request = this.buildForwardedRequest(
       ctx,
-      message,
+      facts,
       requesterSessionId,
       targetSessionId,
-      forwarded,
-      sessionApproval,
     );
     const requestPath = join(location.requestsDir, `${request.id}.json`);
     const responsePath = join(location.responsesDir, `${request.id}.json`);
@@ -198,32 +213,47 @@ export class ParentAuthorizer implements Authorizer {
 
   private buildForwardedRequest(
     ctx: ForwarderContext,
-    message: string,
+    facts: ForwardedRequestFacts,
     requesterSessionId: string,
     targetSessionId: string,
-    forwarded?: ForwardedPromptDisplay,
-    sessionApproval?: ForwardedSessionApproval,
   ): ForwardedPermissionRequest {
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${process.pid}`;
     const requesterAgentName =
       getActiveAgentName(ctx) ??
       getActiveAgentNameFromSystemPrompt(getContextSystemPrompt(ctx)) ??
       "unknown";
+    // Complete the child-fixed facts into a full ForwardedAccessIntent: the
+    // gate fixed the access facts; the edge stamps the requester identity it
+    // alone knows (cwd + principal). The parent resolves against this intent
+    // and never re-derives the match set (ADR 0008).
+    const accessIntent = facts.accessIntent
+      ? {
+          ...facts.accessIntent,
+          requesterCwd: getCwd(ctx),
+          principal: {
+            sessionId: requesterSessionId,
+            agentName: requesterAgentName,
+          },
+        }
+      : undefined;
     return {
       id: requestId,
       createdAt: Date.now(),
       requesterSessionId,
       targetSessionId,
       requesterAgentName,
-      message,
-      ...(forwarded
+      message: facts.message,
+      ...(facts.display
         ? {
-            source: forwarded.source,
-            surface: forwarded.surface,
-            value: forwarded.value,
+            source: facts.display.source,
+            surface: facts.display.surface,
+            value: facts.display.value,
           }
         : {}),
-      ...(sessionApproval ? { sessionApproval } : {}),
+      ...(facts.sessionApproval
+        ? { sessionApproval: facts.sessionApproval }
+        : {}),
+      ...(accessIntent ? { accessIntent } : {}),
     };
   }
 

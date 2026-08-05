@@ -600,6 +600,22 @@ describe("mergeUnifiedConfigs", () => {
     expect(merged.piInfrastructureReadPaths).toEqual([]);
   });
 
+  it("override authorizerChain replaces base array", () => {
+    const merged = mergeUnifiedConfigs(
+      { authorizerChain: ["base-judge"] },
+      { authorizerChain: ["override-judge"] },
+    );
+    expect(merged.authorizerChain).toEqual(["override-judge"]);
+  });
+
+  it("base authorizerChain survives when override omits it", () => {
+    const merged = mergeUnifiedConfigs(
+      { authorizerChain: ["kept-judge"] },
+      { debugLog: true },
+    );
+    expect(merged.authorizerChain).toEqual(["kept-judge"]);
+  });
+
   it("base shellTools survives when override omits it", () => {
     const merged = mergeUnifiedConfigs(
       { shellTools: { exec_command: { commandArgument: "cmd" } } },
@@ -730,7 +746,9 @@ describe("loadAndMergeConfigs", () => {
     const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0]).toContain("pi-permissions.jsonc");
-    expect(result.issues[0]).toContain("extensions/pi-permission-system");
+    expect(result.issues[0].replaceAll("\\", "/")).toContain(
+      "extensions/pi-permission-system",
+    );
     // Legacy file has no flat-format permission key — no rules extracted
     expect(result.merged.permission).toBeUndefined();
   });
@@ -742,8 +760,12 @@ describe("loadAndMergeConfigs", () => {
 
     const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
     expect(result.issues).toHaveLength(1);
-    expect(result.issues[0]).toContain(".pi/agent/pi-permissions.jsonc");
-    expect(result.issues[0]).toContain(".pi/extensions/pi-permission-system");
+    expect(result.issues[0].replaceAll("\\", "/")).toContain(
+      ".pi/agent/pi-permissions.jsonc",
+    );
+    expect(result.issues[0].replaceAll("\\", "/")).toContain(
+      ".pi/extensions/pi-permission-system",
+    );
     // Legacy file has no flat-format permission key — no rules extracted
     expect(result.merged.permission).toBeUndefined();
   });
@@ -811,5 +833,58 @@ describe("loadAndMergeConfigs", () => {
 
     const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
     expect(result.issues).toEqual([]);
+  });
+
+  describe("includeProjectScope", () => {
+    it("omits the new project config when includeProjectScope is false", () => {
+      writeGlobal({
+        permission: { "*": "ask", bash: "deny" },
+      });
+      writeProject({
+        permission: { bash: "allow" },
+      });
+
+      const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot, {
+        includeProjectScope: false,
+      });
+
+      // The untrusted project's `bash: allow` must not override global `deny`.
+      expect(result.merged.permission).toEqual({ "*": "ask", bash: "deny" });
+      expect(result.project).toEqual({});
+    });
+
+    it("omits the legacy project policy when includeProjectScope is false", () => {
+      writeGlobal({ permission: { "*": "ask" } });
+      writeLegacyProjectPolicy({ permission: { "*": "allow" } });
+
+      const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot, {
+        includeProjectScope: false,
+      });
+
+      expect(result.merged.permission).toEqual({ "*": "ask" });
+      expect(
+        result.issues.some((i) => i.includes("pi-permissions.jsonc")),
+      ).toBe(false);
+    });
+
+    it("includes the project config when includeProjectScope is true", () => {
+      writeGlobal({ permission: { "*": "ask", bash: "deny" } });
+      writeProject({ permission: { bash: "allow" } });
+
+      const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot, {
+        includeProjectScope: true,
+      });
+
+      expect(result.merged.permission).toEqual({ "*": "ask", bash: "allow" });
+    });
+
+    it("includes the project config by default (option omitted)", () => {
+      writeGlobal({ permission: { "*": "ask", bash: "deny" } });
+      writeProject({ permission: { bash: "allow" } });
+
+      const result = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
+
+      expect(result.merged.permission).toEqual({ "*": "ask", bash: "allow" });
+    });
   });
 });

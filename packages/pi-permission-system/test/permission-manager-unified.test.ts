@@ -22,7 +22,6 @@ import type { Ruleset } from "#src/rule";
 import {
   createAgentDirHarness,
   createInMemoryManager,
-  createInMemoryPolicyLoader,
   createManager,
   createManagerWithConfig,
   createManagerWithProject,
@@ -77,8 +76,8 @@ describe("PermissionManager — injected platform (#510)", () => {
   it("win32: a /tmp* allow rule suppresses a Git Bash /tmp path (#533)", async () => {
     // End to end: parse `ls /tmp` under win32, take the token's match values,
     // and confirm a natural `/tmp*` external_directory allow rule matches them.
-    // The win32 matcher folds the rule's separators (/ -> \), so the literal
-    // carries a backslash match alias for this to resolve.
+    // The win32 matcher folds separators on both the rule and the value (#653),
+    // so the as-typed literal resolves without a backslash match alias.
     const program = await BashProgram.parse(
       "ls /tmp",
       new PathNormalizer(win32PathFlavor, "C:/projects/app"),
@@ -101,6 +100,36 @@ describe("PermissionManager — injected platform (#510)", () => {
       [],
     );
     expect(noRule.state).not.toBe("allow");
+  });
+
+  it("win32: a /dev/null path allow rule suppresses the Git Bash device prompt (#653)", async () => {
+    // The reported repro: `echo hi > /dev/null` reaches the `path` surface with
+    // the device spelled as typed, so a rule written the same way must win over
+    // a preceding universal ask.
+    const program = await BashProgram.parse(
+      "echo hi > /dev/null",
+      new PathNormalizer(win32PathFlavor, "C:\\projects\\app"),
+    );
+    const values = program.pathRuleCandidates()[0].path.matchValues();
+    expect(values).toEqual(["/dev/null"]);
+
+    const manager = new PermissionManager({
+      globalConfigPath: "/nonexistent/config.json",
+      agentsDir: "/nonexistent/agents",
+      flavor: win32PathFlavor,
+    });
+
+    const allowed = manager.check(
+      { kind: "path-values", surface: "path", values },
+      [sessionRule("path", "*", "ask"), sessionRule("path", "/dev/null")],
+    );
+    expect(allowed.state).toBe("allow");
+
+    const askedWithoutRule = manager.check(
+      { kind: "path-values", surface: "path", values },
+      [sessionRule("path", "*", "ask")],
+    );
+    expect(askedWithoutRule.state).toBe("ask");
   });
 });
 
@@ -995,87 +1024,6 @@ describe("PermissionManager with in-memory PolicyLoader", () => {
       expect(
         rules.some((r) => r.surface === "bash" && r.pattern === "git *"),
       ).toBe(true);
-    });
-  });
-
-  describe("getPromotablePathTokenMatcher (#509)", () => {
-    it("matches a bare token against a specific deny pattern", () => {
-      const manager = createInMemoryManager({
-        global: { permission: { path: { id_rsa: "deny" } } },
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("id_rsa")).toBe(true);
-      expect(isPromotable("other_file")).toBe(false);
-    });
-
-    it("matches a bare token against a specific ask wildcard pattern", () => {
-      const manager = createInMemoryManager({
-        global: { permission: { path: { "*.pem": "ask" } } },
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("key.pem")).toBe(true);
-      expect(isPromotable("key.txt")).toBe(false);
-    });
-
-    it("does not match against the universal '*' path pattern", () => {
-      const manager = createInMemoryManager({
-        global: { permission: { path: { "*": "ask" } } },
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("anything")).toBe(false);
-      expect(isPromotable("status")).toBe(false);
-    });
-
-    it("does not match against an allow-only path pattern", () => {
-      const manager = createInMemoryManager({
-        global: { permission: { path: { id_rsa: "allow" } } },
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("id_rsa")).toBe(false);
-    });
-
-    it("returns a no-op matcher when no path rules exist", () => {
-      const manager = createInMemoryManager({
-        global: { permission: { read: "allow" } },
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("id_rsa")).toBe(false);
-      expect(isPromotable("anything")).toBe(false);
-    });
-
-    it("folds case on an injected win32 platform", () => {
-      const manager = new PermissionManager({
-        policyLoader: createInMemoryPolicyLoader({
-          global: { permission: { path: { id_rsa: "deny" } } },
-        }),
-        flavor: win32PathFlavor,
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("ID_RSA")).toBe(true);
-    });
-
-    it("stays case-sensitive on a POSIX platform", () => {
-      const manager = new PermissionManager({
-        policyLoader: createInMemoryPolicyLoader({
-          global: { permission: { path: { id_rsa: "deny" } } },
-        }),
-        flavor: posixPathFlavor,
-      });
-      const isPromotable = manager.getPromotablePathTokenMatcher();
-      expect(isPromotable("ID_RSA")).toBe(false);
-    });
-
-    it("scopes to the requested agent's composed rules", () => {
-      const manager = createInMemoryManager({
-        global: { permission: { path: { id_rsa: "deny" } } },
-        agent: {
-          coder: { permission: { path: { "secret.key": "deny" } } },
-        },
-      });
-      const globalMatcher = manager.getPromotablePathTokenMatcher();
-      const agentMatcher = manager.getPromotablePathTokenMatcher("coder");
-      expect(globalMatcher("secret.key")).toBe(false);
-      expect(agentMatcher("secret.key")).toBe(true);
     });
   });
 });

@@ -1,5 +1,19 @@
 # Changelog
 
+## [5.1.8](https://github.com/gotgenes/pi-packages/compare/pi-autoformat-v5.1.7...pi-autoformat-v5.1.8) (2026-07-29)
+
+
+### Documentation
+
+* **pi-autoformat:** document the unit/acceptance suite split ([#678](https://github.com/gotgenes/pi-packages/issues/678)) ([3f6ca72](https://github.com/gotgenes/pi-packages/commit/3f6ca7213b4794a150f0bbdded5c10a7797ec2e6))
+
+## [5.1.7](https://github.com/gotgenes/pi-packages/compare/pi-autoformat-v5.1.6...pi-autoformat-v5.1.7) (2026-07-19)
+
+
+### Documentation
+
+* **pi-autoformat:** document RPC harness timeout override ([#618](https://github.com/gotgenes/pi-packages/issues/618)) ([af2d002](https://github.com/gotgenes/pi-packages/commit/af2d0020e86794f6510eed4527842f509fd563a9))
+
 ## [5.1.6](https://github.com/gotgenes/pi-packages/compare/pi-autoformat-v5.1.5...pi-autoformat-v5.1.6) (2026-06-22)
 
 

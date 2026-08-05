@@ -7,7 +7,7 @@ import type {
 import { isGateBypass, isGateDescriptor } from "#src/handlers/gates/descriptor";
 import { describeExternalDirectoryGate } from "#src/handlers/gates/external-directory";
 import type { ToolCallContext } from "#src/handlers/gates/types";
-import { pathFlavorForPlatform } from "#src/path/path-flavor";
+import { posixPathFlavor } from "#src/path/path-flavor";
 import { PathNormalizer } from "#src/path-normalizer";
 import type { ScopedPermissionResolver } from "#src/permission-resolver";
 import type { ToolAccessExtractorLookup } from "#src/tool-access-extractor-registry";
@@ -43,7 +43,7 @@ function gateUnderTest(
     tcc,
     infraDirs,
     resolver,
-    new PathNormalizer(pathFlavorForPlatform(process.platform), tcc.cwd),
+    new PathNormalizer(posixPathFlavor, tcc.cwd),
     extractors,
   );
 }
@@ -130,6 +130,22 @@ describe("describeExternalDirectoryGate", () => {
     ) as GateDescriptor;
     expect(result.decision.value).toBe("/outside/project/file.ts");
     expect(result.decision.surface).toBe("external_directory");
+  });
+
+  it("carries the child-fixed access facts on promptDetails (external_directory surface)", () => {
+    const path = "/outside/project/file.ts";
+    const result = gateUnderTest(makeTcc({ input: { path } }), [
+      "/test/agent",
+    ]) as GateDescriptor;
+    const accessPath = new PathNormalizer(
+      posixPathFlavor,
+      "/test/project",
+    ).forPath(path);
+    expect(result.promptDetails.accessIntent).toEqual({
+      surface: "external_directory",
+      matchValues: accessPath.matchValues(),
+      boundaryValue: accessPath.boundaryValue(),
+    });
   });
 
   it("carries a precomputed preCheck and an empty input (matching is done by the gate)", () => {
