@@ -9,6 +9,9 @@ describe("classifyWin32BashToken", () => {
       "/dev/stdin",
       "/dev/stdout",
       "/dev/stderr",
+      "NUL",
+      "nul.txt",
+      "C:\\temp\\NUL",
     ])("%s is a device", (token) => {
       expect(classifyWin32BashToken(token)).toEqual({ kind: "device" });
     });
@@ -77,6 +80,8 @@ describe("classifyWin32BashToken", () => {
       "C:\\Users\\x",
       "C:/Users/x",
       "../up",
+      "NULL.txt",
+      "C:\\temp\\NULX",
     ])("%s is plain", (token) => {
       expect(classifyWin32BashToken(token)).toEqual({ kind: "plain" });
     });

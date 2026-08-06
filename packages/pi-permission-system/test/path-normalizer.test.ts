@@ -212,6 +212,14 @@ describe("PathNormalizer", () => {
       );
     });
 
+    test("forPath preserves a Windows NUL device as a safe device", () => {
+      const ap = normalizer.forPath("NUL");
+      expect(ap.value()).toBe("NUL");
+      expect(ap.boundaryValue()).toBe("NUL");
+      expect(normalizer.isOutsideWorkingDirectory("NUL")).toBe(false);
+      expect(normalizer.isBoundaryOutsideWorkingDirectory("NUL")).toBe(false);
+    });
+
     test("forBashToken preserves a POSIX device path as a safe device", () => {
       const ap = normalizer.forBashToken("/dev/null");
       expect(ap.value()).toBe("/dev/null");

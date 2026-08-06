@@ -1,5 +1,4 @@
 import type { PathFlavor } from "#src/path/path-flavor";
-import { isSafeSystemPath } from "#src/safe-system-paths";
 
 /**
  * Pure geometry: is `canonicalPath` outside `canonicalCwd`?
@@ -17,7 +16,7 @@ export function isPathOutsideWorkingDirectory(
   if (!canonicalCwd || !canonicalPath) {
     return false;
   }
-  if (isSafeSystemPath(canonicalPath)) {
+  if (flavor.isSafeSystemPath(canonicalPath)) {
     return false;
   }
   return !flavor.isWithin(canonicalPath, canonicalCwd);

@@ -5,6 +5,7 @@ import {
   type BashTokenShape,
   classifyWin32BashToken,
 } from "#src/access-intent/bash/msys-bash-tokens";
+import { isSafeSystemPath, isWindowsDevicePath } from "#src/safe-system-paths";
 import type { WildcardMatchOptions } from "#src/wildcard-matcher";
 
 /**
@@ -49,6 +50,12 @@ export interface PathFlavor {
    * True when `token` contains a path separator under this platform: `/` on
    * POSIX; `/` or `\` on win32 (where a backslash is a separator, #520).
    */
+  /**
+   * True when `pathValue` names an OS device that is not a filesystem path
+   * under this platform's path language.
+   */
+  isSafeSystemPath(pathValue: string): boolean;
+  /** True when `token` contains a platform-specific path separator. */
   hasPathSeparator(token: string): boolean;
   /**
    * The MSYS/Git-Bash interpretation of a bash-command token. On win32 this
@@ -92,6 +99,13 @@ class PlatformPathFlavor implements PathFlavor {
 
   hasPathSeparator(token: string): boolean {
     return token.includes("/") || (this.windows && token.includes("\\"));
+  }
+
+  isSafeSystemPath(pathValue: string): boolean {
+    return (
+      isSafeSystemPath(pathValue) ||
+      (this.windows && isWindowsDevicePath(pathValue))
+    );
   }
 
   bashTokenShape(token: string): BashTokenShape {

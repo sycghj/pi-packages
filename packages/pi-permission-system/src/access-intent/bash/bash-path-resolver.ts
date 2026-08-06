@@ -17,7 +17,6 @@ import {
 } from "#src/access-intent/bash/token-collection";
 import { normalizePathPolicyLiteral } from "#src/access-intent/path-normalization";
 import type { PathNormalizer } from "#src/path-normalizer";
-import { isSafeSystemPath } from "#src/safe-system-paths";
 
 // ── Internal types ───────────────────────────────────────────────────────────
 
@@ -436,7 +435,11 @@ export class BashPathResolver {
       if (base.kind === "unknown" && this.isRelativeCandidate(candidate)) {
         const accessPath = this.normalizer.forPath(candidate);
         const canonical = accessPath.boundaryValue();
-        if (canonical && !isSafeSystemPath(canonical) && !seen.has(canonical)) {
+        if (
+          canonical &&
+          !this.normalizer.flavor.isSafeSystemPath(canonical) &&
+          !seen.has(canonical)
+        ) {
           seen.add(canonical);
           externalPaths.push(accessPath);
         }

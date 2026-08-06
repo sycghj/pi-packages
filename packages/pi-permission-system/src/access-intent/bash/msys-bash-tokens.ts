@@ -7,7 +7,7 @@
  * module so the shape knowledge is unit-testable in isolation (no filesystem,
  * no platform read).
  */
-import { isSafeSystemPath } from "#src/safe-system-paths";
+import { isSafeSystemPath, isWindowsDevicePath } from "#src/safe-system-paths";
 
 /**
  * The MSYS interpretation of a win32 bash token:
@@ -37,7 +37,9 @@ export type BashTokenShape =
 const MSYS_DRIVE_MOUNT_PATTERN = /^\/([a-zA-Z])(\/.*)?$/;
 
 export function classifyWin32BashToken(token: string): BashTokenShape {
-  if (isSafeSystemPath(token)) return { kind: "device" };
+  if (isSafeSystemPath(token) || isWindowsDevicePath(token)) {
+    return { kind: "device" };
+  }
 
   const driveMatch = MSYS_DRIVE_MOUNT_PATTERN.exec(token);
   if (driveMatch) {

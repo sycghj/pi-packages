@@ -54,6 +54,9 @@ export class PathNormalizer {
 
   /** Build an AccessPath for a token, resolved against `resolveBase` (default cwd). */
   forPath(pathValue: string, options?: { resolveBase?: string }): AccessPath {
+    if (this.flavor.isSafeSystemPath(pathValue)) {
+      return AccessPath.forDevice(pathValue);
+    }
     return AccessPath.forPath(pathValue, {
       cwd: this.cwd,
       resolveBase: options?.resolveBase,
@@ -146,6 +149,7 @@ export class PathNormalizer {
 
   /** Canonical (symlink-resolved) outside-cwd test against the baked cwd. */
   isOutsideWorkingDirectory(pathValue: string): boolean {
+    if (this.flavor.isSafeSystemPath(pathValue)) return false;
     const canonicalPath = canonicalNormalizePathForComparison(
       pathValue,
       this.cwd,

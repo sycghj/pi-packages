@@ -10,7 +10,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import { isPathOutsideWorkingDirectory } from "#src/path/path-containment";
-import { posixPathFlavor } from "#src/path/path-flavor";
+import { posixPathFlavor, win32PathFlavor } from "#src/path/path-flavor";
 
 describe("isPathOutsideWorkingDirectory", () => {
   // Pure geometry over already-canonical operands: the caller (PathNormalizer)
@@ -101,6 +101,16 @@ describe("isPathOutsideWorkingDirectory", () => {
         "/dev/stderr",
         canonicalCwd,
         posixPathFlavor,
+      ),
+    ).toBe(false);
+  });
+
+  test("returns false for Windows NUL device", () => {
+    expect(
+      isPathOutsideWorkingDirectory(
+        "NUL",
+        "C:\\projects\\app",
+        win32PathFlavor,
       ),
     ).toBe(false);
   });
