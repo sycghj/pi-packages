@@ -2,23 +2,3 @@
 # Inject scripts/bin ahead of system PATH so project shims (e.g., npm → pnpm) take priority.
 # See scripts/bin/README.md for the full list of shims and their rationale.
 _.path = ["scripts/bin"]
-
-[tasks."permission-system:dev"]
-description = "Fast local pi-permission-system validation"
-run = "pnpm --dir packages/pi-permission-system test test/auto-mode-request.test.ts test/authority/forwarded-request-server.test.ts test/session-approval.test.ts"
-
-[tasks."permission-system:affected"]
-description = "Changed-file pi-permission-system validation with safe fallback"
-run = "pnpm --dir packages/pi-permission-system test test/auto-mode-request.test.ts test/authority/forwarded-request-server.test.ts test/session-approval.test.ts"
-
-[tasks."permission-system:release"]
-description = "Release-readiness pi-permission-system validation"
-run = "pnpm --dir packages/pi-permission-system test && pnpm --dir packages/pi-permission-system run check && pnpm --dir packages/pi-permission-system run verify:public-types && pnpm --dir packages/pi-permission-system run lint"
-
-[tasks."permission-system:parity"]
-description = "Verify local and GitHub gates match for pi-permission-system"
-run = "pnpm --dir packages/pi-permission-system run check && pnpm --dir packages/pi-permission-system run verify:public-types && pnpm --dir packages/pi-permission-system run lint && pnpm --dir packages/pi-permission-system test"
-
-[tasks."permission-system:verify"]
-description = "Final pi-permission-system done gate"
-run = "pnpm --dir packages/pi-permission-system test && pnpm --dir packages/pi-permission-system run check && pnpm --dir packages/pi-permission-system run lint"

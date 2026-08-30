@@ -6,7 +6,7 @@
     "packages/*/src/service.ts"
   ],
   "ignoreExportsUsedInFile": true,
-  "ignoreDependencies": ["tree-sitter-bash", "@gotgenes/pi-subagents"],
+  "ignoreDependencies": ["@gotgenes/pi-subagents"],
   "ignorePatterns": ["**/test/fixtures/**", "**/tests/fixtures/**"],
   "health": {
     "thresholdOverrides": [

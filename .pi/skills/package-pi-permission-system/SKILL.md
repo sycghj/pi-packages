@@ -1,8 +1,8 @@
 ---
 name: package-pi-permission-system
 description: |
-  Package-specific context for @gotgenes/pi-permission-system.
-  Load when working on code, tests, or docs in packages/pi-permission-system/.
+  Package-specific context for @sycghj/pi-permission-system.
+  Load when working on code, tests, or docs in ../pi-permission-system/.
 ---
 
 # pi-permission-system
@@ -181,7 +181,7 @@ Since #478 the manager and resolver each expose a single resolution method (`Sco
 An inline handler that mocks `permissionManager.check` directly must dispatch on `intent.kind` (`path-values` carries `values`, `tool` carries `input`) and `intent.surface`, or external-directory checks false-green to `allow`.
 The gate emitting the intent picks the surface: since #486 every path gate emits `access-path` — the tool/bash path gates on `"path"` and the external-directory gates on `"external_directory"` — and since #502 the per-tool gate also emits `access-path` on the tool-name surface (`read`/`write`/`edit`/`grep`/`find`/`ls`); the resolver unwraps it via `AccessPath.matchValues()` to match a path's typed and symlink-resolved aliases, so the `path` surface and the per-tool surfaces now match the canonical form too (#418, #486, #502).
 The gate-emitted `path-values` variant was removed; `path-values` survives only as the resolver-internal `ResolvedAccessIntent` form the string-based manager consumes (so `permissionManager.check` and the `makeHandler` adapter at line above still see `tool | path-values`).
-This resolver-internal boundary is a deliberate, formalized seam, not transitional scaffolding (see `packages/pi-permission-system/docs/decisions/0002-path-values-string-boundary.md`, #506): the manager stays string-based and must not import `AccessPath` — a `no-restricted-imports` lint rule on `permission-manager.ts` guards it.
+This resolver-internal boundary is a deliberate, formalized seam, not transitional scaffolding (see `../pi-permission-system/docs/decisions/0002-path-values-string-boundary.md`, #506): the manager stays string-based and must not import `AccessPath` — a `no-restricted-imports` lint rule on `permission-manager.ts` guards it.
 
 - Test permission resolution (allow/deny/ask decisions across tools, bash, MCP, skills, special).
 - Test wildcard matching (bash patterns, skill globs) including over-match and under-match cases.
