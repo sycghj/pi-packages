@@ -59,8 +59,10 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       description: str(fm.description) ?? name,
       builtinToolNames: csvList(fm.tools, BUILTIN_TOOL_NAMES),
       model: str(fm.model),
+      fallbackModels: parseCsvField(fm.fallback_models),
       thinking: str(fm.thinking) as ThinkingLevel | undefined,
       maxTurns: nonNegativeInt(fm.max_turns),
+      maxRuntimeMinutes: positiveInt(fm.max_runtime_minutes),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "replace" ? "replace" : "append",
       inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
@@ -81,7 +83,12 @@ function str(val: unknown): string | undefined {
 
 /** Extract a non-negative integer or undefined. 0 means unlimited for max_turns. */
 function nonNegativeInt(val: unknown): number | undefined {
-  return typeof val === "number" && val >= 0 ? val : undefined;
+  return typeof val === "number" && Number.isInteger(val) && val >= 0 ? val : undefined;
+}
+
+/** Extract a positive integer or undefined. */
+function positiveInt(val: unknown): number | undefined {
+  return typeof val === "number" && Number.isInteger(val) && val > 0 ? val : undefined;
 }
 
 /**

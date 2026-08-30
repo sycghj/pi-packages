@@ -141,6 +141,32 @@ describe("resolveSpawnConfig — model resolution", () => {
     );
     expect("error" in result && result.error).toBeTruthy();
   });
+
+  it("resolves configured fallback models in order", () => {
+    const luna = makeModel({ provider: "new-provider", id: "gpt-5.6-luna", name: "GPT-5.6-LUNA" });
+    const terra = makeModel({ provider: "new-provider", id: "gpt-5.6-terra", name: "GPT-5.6-Terra" });
+    const registry = new AgentTypeRegistry(() => new Map([
+      ["fallback-agent", makeAgentConfig({
+        name: "fallback-agent",
+        fallbackModels: ["new-provider/gpt-5.6-luna", "terra"],
+      })],
+    ]));
+    const models = [luna, terra];
+    const result = resolveSpawnConfig(
+      { subagent_type: "fallback-agent", prompt: "test", description: "d" },
+      registry,
+      makeModelInfo({
+        modelRegistry: {
+          find: (provider, id) => models.find((model) => model.provider === provider && model.id === id),
+          getAll: () => models,
+          getAvailable: () => models,
+        },
+      }),
+      defaultSettings,
+    );
+    if ("error" in result) throw new Error(result.error);
+    expect(result.execution.fallbackModels).toEqual([luna, terra]);
+  });
 });
 
 describe("resolveSpawnConfig — max turns normalization", () => {
@@ -178,6 +204,20 @@ describe("resolveSpawnConfig — max turns normalization", () => {
   });
 });
 
+describe("resolveSpawnConfig — max runtime", () => {
+  it("uses max_runtime_minutes from the tool call", () => {
+    const result = resolveSpawnConfig(
+      { subagent_type: "general-purpose", prompt: "test", description: "d", max_runtime_minutes: 75 },
+      testRegistry,
+      makeModelInfo(),
+      defaultSettings,
+    );
+    if ("error" in result) throw new Error(result.error);
+    expect(result.execution.maxRuntimeMinutes).toBe(75);
+    expect(result.execution.agentInvocation.maxRuntimeMinutes).toBe(75);
+  });
+});
+
 describe("resolveSpawnConfig — invocation fields", () => {
   it("sets runInBackground from params", () => {
     const result = resolveSpawnConfig(
@@ -202,6 +242,7 @@ describe("resolveSpawnConfig — invocation fields", () => {
       modelName: undefined,
       thinking: "high",
       maxTurns: undefined,
+      maxRuntimeMinutes: undefined,
       inheritContext: false,
       runInBackground: false,
     });

@@ -22,6 +22,7 @@ describe("resolveAgentInvocationConfig", () => {
         model: "provider/config-model",
         thinking: "high",
         maxTurns: 42,
+        maxRuntimeMinutes: 90,
         inheritContext: false,
         runInBackground: false,
       }),
@@ -29,6 +30,7 @@ describe("resolveAgentInvocationConfig", () => {
         model: "provider/param-model",
         thinking: "minimal",
         max_turns: 1,
+        max_runtime_minutes: 5,
         inherit_context: true,
         run_in_background: true,
       },
@@ -38,6 +40,7 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.modelFromParams).toBe(false);
     expect(resolved.thinking).toBe("high");
     expect(resolved.maxTurns).toBe(42);
+    expect(resolved.maxRuntimeMinutes).toBe(90);
     expect(resolved.inheritContext).toBe(false);
     expect(resolved.runInBackground).toBe(false);
   });
@@ -47,6 +50,7 @@ describe("resolveAgentInvocationConfig", () => {
       model: "provider/param-model",
       thinking: "minimal",
       max_turns: 3,
+      max_runtime_minutes: 75,
       inherit_context: true,
       run_in_background: true,
     });
@@ -55,6 +59,7 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.modelFromParams).toBe(true);
     expect(resolved.thinking).toBe("minimal");
     expect(resolved.maxTurns).toBe(3);
+    expect(resolved.maxRuntimeMinutes).toBe(75);
     expect(resolved.inheritContext).toBe(true);
     expect(resolved.runInBackground).toBe(true);
   });

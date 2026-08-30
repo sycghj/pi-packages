@@ -50,8 +50,12 @@ export interface AgentPromptConfig {
 export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
   builtinToolNames?: string[];
   model?: string;
+  /** Ordered model candidates used after a retryable provider failure. */
+  fallbackModels?: string[];
   thinking?: ThinkingLevel;
   maxTurns?: number;
+  /** Total runtime ceiling for one run/resume. */
+  maxRuntimeMinutes?: number;
   /** Default for spawn: fork parent conversation. undefined = caller decides. */
   inheritContext?: boolean;
   /** Default for spawn: run in background. undefined = caller decides. */
@@ -71,6 +75,7 @@ export interface AgentInvocation {
   modelName?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;
+  maxRuntimeMinutes?: number;
   inheritContext?: boolean;
   runInBackground?: boolean;
 }

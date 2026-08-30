@@ -8,16 +8,21 @@ import { loadCustomAgents } from "#src/config/custom-agents";
 describe("loadCustomAgents", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
+  let originalAgentDir: string | undefined;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "pi-test-"));
     originalHome = process.env.HOME;
+    originalAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.HOME = tmpDir;
+    process.env.PI_CODING_AGENT_DIR = join(tmpDir, ".pi", "agent");
   });
 
   afterEach(() => {
     if (originalHome == null) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -37,8 +42,10 @@ describe("loadCustomAgents", () => {
 description: Security Auditor
 tools: read, grep, find
 model: anthropic/claude-opus-4-6
+fallback_models: new-provider/gpt-5.6-luna, new-provider/gpt-5.6-terra
 thinking: high
 max_turns: 30
+max_runtime_minutes: 90
 prompt_mode: replace
 inherit_context: true
 run_in_background: true
@@ -54,8 +61,13 @@ You are a security auditor.`);
     expect(agent.description).toBe("Security Auditor");
     expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
     expect(agent.model).toBe("anthropic/claude-opus-4-6");
+    expect(agent.fallbackModels).toEqual([
+      "new-provider/gpt-5.6-luna",
+      "new-provider/gpt-5.6-terra",
+    ]);
     expect(agent.thinking).toBe("high");
     expect(agent.maxTurns).toBe(30);
+    expect(agent.maxRuntimeMinutes).toBe(90);
     expect(agent.promptMode).toBe("replace");
     expect(agent.inheritContext).toBe(true);
     expect(agent.runInBackground).toBe(true);
@@ -77,6 +89,8 @@ Just a prompt.`);
     expect(agent.model).toBeUndefined();
     expect(agent.thinking).toBeUndefined();
     expect(agent.maxTurns).toBeUndefined();
+    expect(agent.maxRuntimeMinutes).toBeUndefined();
+    expect(agent.fallbackModels).toBeUndefined();
     expect(agent.promptMode).toBe("append");
     expect(agent.inheritContext).toBeUndefined();
     expect(agent.runInBackground).toBeUndefined();

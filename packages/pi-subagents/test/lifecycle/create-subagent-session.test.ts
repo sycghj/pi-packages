@@ -87,6 +87,36 @@ describe("createSubagentSession — assembly", () => {
     );
   });
 
+  it("caps child provider requests at ten minutes without changing provider retry count", async () => {
+    await createSubagentSession(
+      { snapshot: STUB_SNAPSHOT, type: "Explore" },
+      createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
+    );
+
+    const settings = io.createSettingsManager.mock.results[0].value;
+    expect(settings.getProviderRetrySettings()).toEqual({
+      timeoutMs: 600_000,
+      maxRetries: 0,
+      maxRetryDelayMs: 60_000,
+    });
+  });
+
+  it("hands retry ownership to the subagent loop when fallback models are configured", async () => {
+    const fallback = STUB_SNAPSHOT.model!;
+    const originalSettings = io.createSettingsManager();
+    const persistDefault = originalSettings.setDefaultModelAndProvider;
+    io.createSettingsManager.mockClear();
+    await createSubagentSession(
+      { snapshot: STUB_SNAPSHOT, type: "Explore", fallbackModels: [fallback] },
+      createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
+    );
+
+    const settings = io.createSettingsManager.mock.results[0].value;
+    expect(settings.getRetrySettings()).toEqual({ enabled: false, maxRetries: 10, baseDelayMs: 2_000 });
+    settings.setDefaultModelAndProvider("new-provider", "gpt-5.6-luna");
+    expect(persistDefault).not.toHaveBeenCalled();
+  });
+
   it("suppresses AGENTS.md/CLAUDE.md/APPEND_SYSTEM.md for subagents", async () => {
     await createSubagentSession(
       { snapshot: STUB_SNAPSHOT, type: "Explore" },

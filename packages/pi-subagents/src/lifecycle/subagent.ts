@@ -11,6 +11,7 @@ import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-codin
 import { debugLog } from "#src/debug";
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
+import { resolveMaxRuntimeMs } from "#src/lifecycle/resilience";
 import { RunListeners } from "#src/lifecycle/run-listeners";
 import type { SubagentSession, TurnLoopResult } from "#src/lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "#src/lifecycle/subagent-state";
@@ -67,7 +68,9 @@ export interface SubagentExecution {
 	/** Resolves the registered workspace provider (if any) at run-start. */
 	getWorkspaceProvider?: () => WorkspaceProvider | undefined;
 	model?: Model<any>;
+	fallbackModels?: Model<any>[];
 	maxTurns?: number;
+	maxRuntimeMinutes?: number;
 	thinkingLevel?: ThinkingLevel;
 	parentSession?: ParentSessionInfo;
 	signal?: AbortSignal;
@@ -116,6 +119,7 @@ export class Subagent {
 	isRunning(): boolean { return this.state.isRunning(); }
 	canBeSteered(): boolean { return this.state.canBeSteered(); }
 	get maxTurns(): number | undefined { return this.execution.maxTurns; }
+	get maxRuntimeMinutes(): number | undefined { return this.execution.maxRuntimeMinutes; }
 
 	readonly abortController: AbortController;
 	private _promise?: Promise<void>;
@@ -273,6 +277,7 @@ export class Subagent {
 				cwd,
 				parentSession: this.execution.parentSession,
 				model: this.execution.model,
+				fallbackModels: this.execution.fallbackModels,
 				thinkingLevel: this.execution.thinkingLevel,
 			});
 		} catch (err) {
@@ -293,6 +298,7 @@ export class Subagent {
 				maxTurns: this.execution.maxTurns,
 				defaultMaxTurns: runConfig?.defaultMaxTurns,
 				graceTurns: runConfig?.graceTurns,
+				maxRuntimeMs: resolveMaxRuntimeMs(this.execution.maxRuntimeMinutes),
 				signal: this.abortController.signal,
 			});
 			this.completeRun(result);
@@ -378,7 +384,11 @@ export class Subagent {
 		}));
 
 		try {
-			this.completeResume(await subagentSession.resumeTurnLoop(prompt, signal));
+			this.completeResume(await subagentSession.resumeTurnLoop(
+				prompt,
+				signal,
+				{ maxRuntimeMs: resolveMaxRuntimeMs(this.execution.maxRuntimeMinutes) },
+			));
 		} catch (err) {
 			this.failResume(err);
 		}

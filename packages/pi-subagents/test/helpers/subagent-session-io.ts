@@ -30,6 +30,15 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
  *   io.assemblerIO.buildAgentPrompt.mockReturnValue("custom");
  */
 export function createSubagentSessionIO() {
+	const settingsManager = {
+		getProviderRetrySettings: vi.fn().mockReturnValue({
+			timeoutMs: 1_800_000,
+			maxRetries: 0,
+			maxRetryDelayMs: 60_000,
+		}),
+		getRetrySettings: vi.fn().mockReturnValue({ enabled: true, maxRetries: 10, baseDelayMs: 2_000 }),
+		setDefaultModelAndProvider: vi.fn(),
+	};
 	return {
 		detectEnv: vi.fn().mockResolvedValue({ isGitRepo: false, branch: "", platform: "linux" }),
 		getAgentDir: vi.fn().mockReturnValue("/mock/agent-dir"),
@@ -40,7 +49,7 @@ export function createSubagentSessionIO() {
 			getSessionFile: vi.fn().mockReturnValue("/sessions/child.jsonl"),
 			getSessionId: vi.fn().mockReturnValue("child-session-id"),
 		}),
-		createSettingsManager: vi.fn().mockReturnValue({}),
+		createSettingsManager: vi.fn().mockReturnValue(settingsManager),
 		createSession: vi.fn(),
 		assemblerIO: {
 			buildAgentPrompt: vi.fn((..._args: unknown[]): string => "system prompt"),

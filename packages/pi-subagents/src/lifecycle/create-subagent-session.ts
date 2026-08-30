@@ -20,6 +20,7 @@ import {
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import type { ChildLifecyclePublisher } from "#src/lifecycle/child-lifecycle";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
+import { configureChildResilience } from "#src/lifecycle/resilience";
 import { SubagentSession } from "#src/lifecycle/subagent-session";
 import type { EnvInfo } from "#src/session/env";
 import type { ModelRegistry } from "#src/session/model-resolver";
@@ -135,6 +136,7 @@ export interface CreateSubagentSessionParams {
   /** Parent session identity (file path + session ID). */
   parentSession?: ParentSessionInfo;
   model?: Model<any>;
+  fallbackModels?: Model<any>[];
   thinkingLevel?: ThinkingLevel;
 }
 
@@ -200,11 +202,16 @@ export async function createSubagentSession(
   sessionManager.newSession({ parentSession: params.parentSession?.parentSessionId });
   const sessionId = sessionManager.getSessionId();
 
+  const settingsManager = configureChildResilience(
+    deps.io.createSettingsManager(cfg.effectiveCwd, agentDir),
+    (params.fallbackModels?.length ?? 0) > 0,
+  );
+
   const { session } = await deps.io.createSession({
     cwd: cfg.effectiveCwd,
     agentDir,
     sessionManager,
-    settingsManager: deps.io.createSettingsManager(cfg.effectiveCwd, agentDir),
+    settingsManager,
     modelRegistry: snapshot.modelRegistry,
     model: cfg.model,
     tools: cfg.toolNames,
@@ -219,6 +226,7 @@ export async function createSubagentSession(
     agentName: type,
     agentMaxTurns: cfg.agentMaxTurns,
     parentContext: snapshot.parentContext,
+    fallbackModels: params.fallbackModels ?? [],
     lifecycle: deps.lifecycle,
   });
 

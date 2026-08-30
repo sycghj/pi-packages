@@ -10,12 +10,14 @@
  * reaching through `subagentSession.session` from `Subagent` (Law of Demeter).
  */
 
+import type { Model } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
   type AgentSessionEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ChildLifecyclePublisher } from "#src/lifecycle/child-lifecycle";
+import { driveResilientPrompt } from "#src/lifecycle/resilience";
 import { normalizeMaxTurns } from "#src/lifecycle/turn-limits";
 import { getSessionContextPercent, type SessionStatsLike } from "#src/lifecycle/usage";
 import { extractText } from "#src/session/context";
@@ -39,6 +41,10 @@ export interface TurnLoopOptions {
   defaultMaxTurns?: number;
   /** Grace turns after the soft-limit steer message before a hard abort. */
   graceTurns?: number;
+  /** Wall-clock ceiling for this run. Defaults to 60 minutes. */
+  maxRuntimeMs?: number;
+  /** Continuous API-failure ceiling. Defaults to 30 minutes. */
+  apiFailureBudgetMs?: number;
   signal?: AbortSignal;
 }
 
@@ -55,6 +61,8 @@ export interface SubagentSessionMeta {
   agentMaxTurns: number | undefined;
   /** Parent context prepended to the run prompt, captured at spawn time. */
   parentContext: string | undefined;
+  /** Ordered model candidates used after retryable provider failures. */
+  fallbackModels: Model<any>[];
   lifecycle: ChildLifecyclePublisher;
 }
 
@@ -117,7 +125,13 @@ export class SubagentSession {
       : prompt;
 
     try {
-      await session.prompt(effectivePrompt);
+      await driveResilientPrompt(session, effectivePrompt, {
+        fallbackModels: this.meta.fallbackModels,
+        maxRuntimeMs: opts.maxRuntimeMs,
+        apiFailureBudgetMs: opts.apiFailureBudgetMs,
+        signal: opts.signal,
+        getPartialOutput: () => collector.getText().trim() || getLastAssistantText(session),
+      });
       this.meta.lifecycle.completed({
         sessionDir: this.meta.sessionDir,
         agentName: this.meta.agentName,
@@ -135,13 +149,23 @@ export class SubagentSession {
   }
 
   /** Re-prompt the same session (resume); does not emit `completed`. */
-  async resumeTurnLoop(prompt: string, signal?: AbortSignal): Promise<string> {
+  async resumeTurnLoop(
+    prompt: string,
+    signal?: AbortSignal,
+    opts: Pick<TurnLoopOptions, "maxRuntimeMs" | "apiFailureBudgetMs"> = {},
+  ): Promise<string> {
     const session = this._session;
     const collector = collectResponseText(session);
     const cleanupAbort = forwardAbortSignal(session, signal);
 
     try {
-      await session.prompt(prompt);
+      await driveResilientPrompt(session, prompt, {
+        fallbackModels: this.meta.fallbackModels,
+        maxRuntimeMs: opts.maxRuntimeMs,
+        apiFailureBudgetMs: opts.apiFailureBudgetMs,
+        signal,
+        getPartialOutput: () => collector.getText().trim() || getLastAssistantText(session),
+      });
     } finally {
       collector.unsubscribe();
       cleanupAbort();
@@ -200,11 +224,16 @@ export class SubagentSession {
 
 // ── Private turn-loop helpers ───────────────────────────────────────────────────
 
+interface ResponseCollector {
+  getText(): string;
+  unsubscribe(): void;
+}
+
 /**
  * Subscribe to a session and collect the last assistant message text.
  * Returns an object with a `getText()` getter and an `unsubscribe` function.
  */
-function collectResponseText(session: AgentSession) {
+function collectResponseText(session: AgentSession): ResponseCollector {
   let text = "";
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "message_start") {

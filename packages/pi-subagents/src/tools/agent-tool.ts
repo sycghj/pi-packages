@@ -193,6 +193,13 @@ ${guidelines}
 						minimum: 1,
 					}),
 				),
+				max_runtime_minutes: Type.Optional(
+					Type.Number({
+						description:
+							"Maximum total runtime in minutes. Defaults to 60 minutes.",
+						minimum: 1,
+					}),
+				),
 				run_in_background: Type.Optional(
 					Type.Boolean({
 						description:

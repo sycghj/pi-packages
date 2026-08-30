@@ -316,6 +316,7 @@ src/
 │   ├── subagent-manager.ts         collection manager + observer wiring + consumption-aware session-retention sweep
 │   ├── create-subagent-session.ts  assembly factory: session creation, binding, tool filtering
 │   ├── subagent-session.ts         born-complete child session: turn loop, steer, dispose
+│   ├── resilience.ts               child request/failure/runtime budgets + ordered model fallback
 │   ├── turn-limits.ts              normalizeMaxTurns (turn-count policy)
 │   ├── subagent.ts                 owns full execution lifecycle (run, abort, steer, wait-until-settled)
 │   ├── subagent-state.ts           lifecycle status + metrics + result-consumption value object (transitions, accumulators, classification predicates)
@@ -545,6 +546,7 @@ The observational surface then carries only fire-and-forget broadcasts of immuta
 - **Agent definitions** — name, model, thinking, system prompt, tools list.
 - **Prompt composition** — system prompt assembly.
 - **Session lifecycle** — create child sessions, bind extensions, run conversation loop, track results.
+- **Execution resilience** — cap child provider requests, enforce continuous-failure and wall-clock budgets, and continue the same child conversation on explicitly configured fallback models ([ADR-0005]).
 - **Concurrency management** — queue, abort, resume, max concurrency.
 - **Recursion guard** — remove pi-subagents' own three tools from child sessions (prevent infinite nesting).
   With `isolated` removed (#264), children always load the parent's resources, so the guard is unconditional rather than gated on `cfg.extensions`.
@@ -782,3 +784,4 @@ The upstream test suite is run periodically as a regression canary for the sessi
 [#610]: https://github.com/gotgenes/pi-packages/issues/610
 [ADR-0002]: ../decisions/0002-extensions-on-a-minimal-core.md
 [ADR-0004]: ../decisions/0004-reconsider-ui-direction.md
+[ADR-0005]: ../decisions/0005-bounded-provider-failures.md

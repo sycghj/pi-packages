@@ -718,6 +718,13 @@ describe("Subagent.run() — RunConfig threading", () => {
 		expect(turnOpts.defaultMaxTurns).toBe(10);
 		expect(turnOpts.graceTurns).toBe(3);
 	});
+
+	it("passes the default 60 minute runtime budget to runTurnLoop", async () => {
+		const { factory, stub } = createFactory();
+		const agent = createRunnableAgent({ createSubagentSession: factory });
+		await agent.run();
+		expect(stub.runTurnLoop.mock.calls[0][1].maxRuntimeMs).toBe(60 * 60_000);
+	});
 });
 
 // ── Subagent.start() ───────────────────────────────────────────────────────────

@@ -22,6 +22,8 @@ Run them in foreground or background, steer them mid-run, resume completed sessi
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
 - **Mid-run steering** — inject messages into running agents to redirect their work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
+- **Bounded provider failures** — child requests time out after 10 minutes, continuous API failures stop after 30 minutes, and each run defaults to a 60-minute wall-clock ceiling with partial-result diagnostics
+- **Model fallback** — custom agents can switch to an ordered fallback model after a retryable provider failure and continue the same child conversation
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort, producing clean partial results instead of cut-off output
 - **Case-insensitive agent types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work.
   Unknown types fall back to general-purpose with a note
@@ -145,8 +147,10 @@ The global location follows the upstream `PI_CODING_AGENT_DIR` env var — set i
 description: Security Code Reviewer
 tools: read, grep, find, bash
 model: anthropic/claude-opus-4-6
+fallback_models: openai/gpt-5.4, google/gemini-3-pro
 thinking: high
 max_turns: 30
+max_runtime_minutes: 90
 ---
 
 You are a security auditor.
@@ -170,21 +174,24 @@ subagent({ subagent_type: "auditor", prompt: "Review the auth module", descripti
 
 All fields are optional — sensible defaults for everything.
 
-| Field               | Default        | Description                                                                                                                                                                                                                                                                                                             |
-| ------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `description`       | filename       | Agent description shown in tool listings                                                                                                                                                                                                                                                                                |
-| `display_name`      | —              | Display name for UI (e.g. widget, agent list)                                                                                                                                                                                                                                                                           |
-| `tools`             | all 7          | Comma-separated built-in tools: read, bash, edit, write, grep, find, ls. `none` for no tools                                                                                                                                                                                                                            |
-| `model`             | inherit parent | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`)                                                                                                                                                                                                                                                        |
-| `thinking`          | inherit        | off, minimal, low, medium, high, xhigh                                                                                                                                                                                                                                                                                  |
-| `max_turns`         | unlimited      | Max agentic turns before graceful shutdown. `0` or omit for unlimited                                                                                                                                                                                                                                                   |
-| `prompt_mode`       | `append`       | `replace`: parent prompt is the cacheable base; body is appended last with full control (no `<sub_agent_context>` bridge, no `<agent_instructions>` wrapper). `append`: parent prompt is the base; body is wrapped in `<agent_instructions>` and a sub-agent context bridge is injected (agent acts as a "parent twin") |
-| `inherit_context`   | `false`        | Fork parent conversation into agent                                                                                                                                                                                                                                                                                     |
-| `run_in_background` | `false`        | Run in background by default                                                                                                                                                                                                                                                                                            |
-| `enabled`           | `true`         | Set to `false` to disable an agent (useful for hiding a default agent per-project)                                                                                                                                                                                                                                      |
+| Field                 | Default        | Description                                                                                                                                                                                                                                                                                                             |
+| --------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`         | filename       | Agent description shown in tool listings                                                                                                                                                                                                                                                                                |
+| `display_name`        | —              | Display name for UI (e.g. widget, agent list)                                                                                                                                                                                                                                                                           |
+| `tools`               | all 7          | Comma-separated built-in tools: read, bash, edit, write, grep, find, ls. `none` for no tools                                                                                                                                                                                                                            |
+| `model`               | inherit parent | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`)                                                                                                                                                                                                                                                        |
+| `fallback_models`     | —              | Ordered comma-separated models. After a retryable provider failure, switch to the next candidate and continue the same conversation                                                                                                                                                                                     |
+| `thinking`            | inherit        | off, minimal, low, medium, high, xhigh                                                                                                                                                                                                                                                                                  |
+| `max_turns`           | unlimited      | Max agentic turns before graceful shutdown. `0` or omit for unlimited                                                                                                                                                                                                                                                   |
+| `max_runtime_minutes` | `60`           | Wall-clock ceiling for one run or resume. Must be a positive integer                                                                                                                                                                                                                                                    |
+| `prompt_mode`         | `append`       | `replace`: parent prompt is the cacheable base; body is appended last with full control (no `<sub_agent_context>` bridge, no `<agent_instructions>` wrapper). `append`: parent prompt is the base; body is wrapped in `<agent_instructions>` and a sub-agent context bridge is injected (agent acts as a "parent twin") |
+| `inherit_context`     | `false`        | Fork parent conversation into agent                                                                                                                                                                                                                                                                                     |
+| `run_in_background`   | `false`        | Run in background by default                                                                                                                                                                                                                                                                                            |
+| `enabled`             | `true`         | Set to `false` to disable an agent (useful for hiding a default agent per-project)                                                                                                                                                                                                                                      |
 
 Frontmatter is authoritative.
-If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, or `run_in_background`, those values are locked for that agent.
+If an agent file sets `model`, `thinking`, `max_turns`, `max_runtime_minutes`, `inherit_context`, or `run_in_background`, those values are locked for that agent.
+`fallback_models` is definition-only and has no per-call override.
 `subagent` tool parameters only fill fields the agent config leaves unspecified.
 
 ## Tools
@@ -193,17 +200,29 @@ If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, or `r
 
 Launch a sub-agent.
 
-| Parameter           | Type         | Required | Description                                                      |
-| ------------------- | ------------ | -------- | ---------------------------------------------------------------- |
-| `prompt`            | string       | yes      | The task for the agent                                           |
-| `description`       | string       | yes      | Short 3-5 word summary (shown in UI)                             |
-| `subagent_type`     | string       | yes      | Agent type (built-in or custom)                                  |
-| `model`             | string       | no       | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
-| `thinking`          | string       | no       | Thinking level: off, minimal, low, medium, high, xhigh           |
-| `max_turns`         | number       | no       | Max agentic turns. Omit for unlimited (default)                  |
-| `run_in_background` | boolean      | no       | Run without blocking                                             |
-| `resume`            | string       | no       | Agent ID to resume a previous session                            |
-| `inherit_context`   | boolean      | no       | Fork parent conversation into agent                              |
+| Parameter             | Type    | Required | Description                                                      |
+| --------------------- | ------- | -------- | ---------------------------------------------------------------- |
+| `prompt`              | string  | yes      | The task for the agent                                           |
+| `description`         | string  | yes      | Short 3-5 word summary (shown in UI)                             |
+| `subagent_type`       | string  | yes      | Agent type (built-in or custom)                                  |
+| `model`               | string  | no       | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
+| `thinking`            | string  | no       | Thinking level: off, minimal, low, medium, high, xhigh           |
+| `max_turns`           | number  | no       | Max agentic turns. Omit for unlimited (default)                  |
+| `max_runtime_minutes` | number  | no       | Wall-clock ceiling. Defaults to 60 minutes                       |
+| `run_in_background`   | boolean | no       | Run without blocking                                             |
+| `resume`              | string  | no       | Agent ID to resume a previous session                            |
+| `inherit_context`     | boolean | no       | Fork parent conversation into agent                              |
+
+### Provider resilience
+
+Every child session caps a single provider request at 10 minutes, independently of the parent's longer timeout.
+Agents without `fallback_models` retain Pi's built-in automatic retry behavior.
+When fallbacks are configured, pi-subagents owns the retry loop so it can await `AgentSession.setModel()` before continuing: the first retryable provider/transport error waits 2 seconds, switches to the first fallback, and re-prompts the existing conversation; later failures use exponential backoff capped at 60 seconds and advance through the remaining candidates.
+Fallback model changes stay local to the child and never rewrite the parent's default model setting.
+
+A successful assistant response resets the 30-minute continuous API-failure window.
+The failure count remains cumulative for diagnostics.
+At that failure limit or the 60-minute total runtime limit (overridable with `max_runtime_minutes`), the session aborts and reports the failure count, last API error, and latest partial output.
 
 ### `get_subagent_result`
 

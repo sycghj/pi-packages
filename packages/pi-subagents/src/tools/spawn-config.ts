@@ -11,7 +11,7 @@ import type { AgentTypeRegistry } from "#src/config/agent-types";
 import { resolveAgentInvocationConfig } from "#src/config/invocation-config";
 import { normalizeMaxTurns } from "#src/lifecycle/turn-limits";
 import type { ModelRegistry } from "#src/session/model-resolver";
-import { resolveInvocationModel } from "#src/session/model-resolver";
+import { resolveInvocationModel, resolveModel } from "#src/session/model-resolver";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "#src/types";
 import {
   type AgentDetails,
@@ -39,7 +39,9 @@ export interface SpawnExecution {
   prompt: string;
   description: string;
   model: Model<any> | undefined;
+  fallbackModels: Model<any>[];
   effectiveMaxTurns: number | undefined;
+  maxRuntimeMinutes: number | undefined;
   thinking: ThinkingLevel | undefined;
   inheritContext: boolean;
   runInBackground: boolean;
@@ -104,6 +106,14 @@ export function resolveSpawnConfig(
   if (resolution.error) return { error: resolution.error };
   const model = resolution.model;
 
+  const fallbackResolution = resolveFallbackModels(
+    customConfig.fallbackModels,
+    modelInfo.modelRegistry,
+    model,
+  );
+  if (typeof fallbackResolution === "string") return { error: fallbackResolution };
+  const fallbackModels = fallbackResolution;
+
   const thinking = resolvedConfig.thinking;
   const inheritContext = resolvedConfig.inheritContext;
   const runInBackground = resolvedConfig.runInBackground;
@@ -124,6 +134,7 @@ export function resolveSpawnConfig(
     modelName,
     thinking,
     maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
+    maxRuntimeMinutes: resolvedConfig.maxRuntimeMinutes,
     inheritContext,
     runInBackground,
   };
@@ -146,7 +157,9 @@ export function resolveSpawnConfig(
       prompt: params.prompt as string,
       description: params.description as string,
       model,
+      fallbackModels,
       effectiveMaxTurns,
+      maxRuntimeMinutes: resolvedConfig.maxRuntimeMinutes,
       thinking,
       inheritContext,
       runInBackground,
@@ -154,4 +167,29 @@ export function resolveSpawnConfig(
     },
     presentation: { modelName, agentTags, detailBase },
   };
+}
+
+/** Resolve and de-duplicate an agent definition's ordered fallback model list. */
+function resolveFallbackModels(
+  inputs: string[] | undefined,
+  registry: ModelRegistry | undefined,
+  primary: Model<any> | undefined,
+): Model<any>[] | string {
+  if (!inputs?.length) return [];
+  if (!registry) return "No model registry available for fallback models.";
+
+  const resolved: Model<any>[] = [];
+  const seen = new Set(primary ? [`${primary.provider}/${primary.id}`.toLowerCase()] : []);
+  for (const input of inputs) {
+    const candidate = resolveModel(input, registry);
+    if (typeof candidate === "string") {
+      return `Fallback ${candidate}`;
+    }
+    const key = `${candidate.provider}/${candidate.id}`.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      resolved.push(candidate);
+    }
+  }
+  return resolved;
 }

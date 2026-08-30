@@ -1,6 +1,7 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SubagentSession } from "#src/lifecycle/subagent-session";
+import { makeModel } from "#test/helpers/make-model";
 import { createChildLifecycleMock } from "#test/helpers/subagent-session-io";
 
 // ── Session mock factory ───────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ function createSession(finalText: string) {
     }),
     abort: vi.fn(),
     steer: vi.fn().mockResolvedValue(undefined),
+    setModel: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn(),
     getSessionStats: vi.fn(() => ({
       tokens: { input: 100, output: 50, cacheWrite: 10 },
@@ -66,6 +68,7 @@ function makeSubagentSession(
     agentName: string;
     agentMaxTurns: number | undefined;
     parentContext: string | undefined;
+    fallbackModels: ReturnType<typeof makeModel>[];
     lifecycle: ReturnType<typeof createChildLifecycleMock>;
   }>,
 ) {
@@ -78,6 +81,7 @@ function makeSubagentSession(
     agentName: metaOverrides?.agentName ?? "Explore",
     agentMaxTurns: metaOverrides?.agentMaxTurns,
     parentContext: metaOverrides?.parentContext,
+    fallbackModels: metaOverrides?.fallbackModels ?? [],
     lifecycle,
   });
   return { sub, lifecycle };
@@ -87,6 +91,10 @@ let lifecycle: ReturnType<typeof createChildLifecycleMock>;
 
 beforeEach(() => {
   lifecycle = createChildLifecycleMock();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("SubagentSession — accessors", () => {
@@ -181,6 +189,96 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     const result = await sub.runTurnLoop("go", { defaultMaxTurns: 1, graceTurns: 5 });
     expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("turn limit"));
     expect(result.steered).toBe(true);
+  });
+});
+
+describe("SubagentSession — runTurnLoop resilience", () => {
+  it("switches to the first fallback model after a retryable API error and continues the session", async () => {
+    vi.useFakeTimers();
+    const luna = makeModel({ provider: "new-provider", id: "gpt-5.6-luna", name: "GPT-5.6-LUNA" });
+    const { session, listeners } = createSession("unused");
+    let attempt = 0;
+    session.prompt = vi.fn(async () => {
+      attempt++;
+      const message = attempt === 1
+        ? { role: "assistant", content: [{ type: "text", text: "partial DS work" }], stopReason: "error", errorMessage: "HTTP 503 service unavailable", usage: { input: 0, output: 0, cacheWrite: 0 } }
+        : { role: "assistant", content: [{ type: "text", text: "LUNA DONE" }], stopReason: "stop", usage: { input: 1, output: 1, cacheWrite: 0 } };
+      session.messages.push(message);
+      for (const listener of listeners) listener({ type: "message_end", message });
+    });
+    const { sub } = makeSubagentSession(session, { fallbackModels: [luna] });
+
+    const run = sub.runTurnLoop("go", { maxRuntimeMs: 10_000, apiFailureBudgetMs: 8_000 });
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await run;
+
+    expect(session.setModel).toHaveBeenCalledWith(luna);
+    expect(session.prompt).toHaveBeenNthCalledWith(2, expect.stringContaining("previous model request failed"));
+    expect(result.responseText).toBe("LUNA DONE");
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
+  it("terminates at the total runtime budget with partial output and failure details", async () => {
+    vi.useFakeTimers();
+    const { session, listeners } = createSession("unused");
+    session.prompt = vi.fn(async () => {
+      for (const listener of listeners) {
+        listener({ type: "message_start" });
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "work in progress" } });
+      }
+      await new Promise<never>(() => {});
+    });
+    const { sub } = makeSubagentSession(session);
+
+    const run = sub.runTurnLoop("go", { maxRuntimeMs: 1_000, apiFailureBudgetMs: 10_000 });
+    const assertion = expect(run).rejects.toThrow(
+      /Total runtime budget exceeded.*API failures: 0.*Partial output: work in progress/s,
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    expect(session.abort).toHaveBeenCalledOnce();
+  });
+
+  it("terminates after a continuous API-failure window and reports the last error", async () => {
+    vi.useFakeTimers();
+    const luna = makeModel({ provider: "new-provider", id: "gpt-5.6-luna", name: "GPT-5.6-LUNA" });
+    const { session, listeners } = createSession("unused");
+    session.prompt = vi.fn(async () => {
+      const message = { role: "assistant", content: [{ type: "text", text: "partial" }], stopReason: "error", errorMessage: "HTTP 503 inference capacity exhausted", usage: { input: 0, output: 0, cacheWrite: 0 } };
+      session.messages.push(message);
+      for (const listener of listeners) listener({ type: "message_end", message });
+    });
+    const { sub } = makeSubagentSession(session, { fallbackModels: [luna] });
+
+    const run = sub.runTurnLoop("go", { maxRuntimeMs: 10_000, apiFailureBudgetMs: 1_000 });
+    const assertion = expect(run).rejects.toThrow(
+      /Continuous API failure budget exceeded.*API failures: 1.*Last API error: HTTP 503 inference capacity exhausted.*Partial output: partial/s,
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    expect(session.abort).toHaveBeenCalledOnce();
+  });
+
+  it("resets the continuous failure timer after a successful model response", async () => {
+    vi.useFakeTimers();
+    const luna = makeModel({ provider: "new-provider", id: "gpt-5.6-luna", name: "GPT-5.6-LUNA" });
+    const { session, listeners } = createSession("unused");
+    let attempt = 0;
+    session.prompt = vi.fn(async () => {
+      attempt++;
+      const message = attempt === 1
+        ? { role: "assistant", content: [], stopReason: "error", errorMessage: "HTTP 503", usage: { input: 0, output: 0, cacheWrite: 0 } }
+        : { role: "assistant", content: [{ type: "text", text: "recovered" }], stopReason: "stop", usage: { input: 1, output: 1, cacheWrite: 0 } };
+      session.messages.push(message);
+      for (const listener of listeners) listener({ type: "message_end", message });
+    });
+    const { sub } = makeSubagentSession(session, { fallbackModels: [luna] });
+
+    const run = sub.runTurnLoop("go", { maxRuntimeMs: 20_000, apiFailureBudgetMs: 5_000 });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(run).resolves.toEqual({ responseText: "recovered", aborted: false, steered: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(session.abort).not.toHaveBeenCalled();
   });
 });
 

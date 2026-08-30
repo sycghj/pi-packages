@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { deriveSubagentSessionDir } from "#src/session/session-dir";
 
@@ -8,7 +9,7 @@ describe("deriveSubagentSessionDir", () => {
       "/home/user/project",
     );
     expect(result).toBe(
-      "/home/user/.pi/agent/sessions/--project--/2026-05-20T12-00-00Z_/tasks",
+      join("/home/user/.pi/agent/sessions/--project--", "2026-05-20T12-00-00Z_", "tasks"),
     );
   });
 
@@ -17,7 +18,7 @@ describe("deriveSubagentSessionDir", () => {
       "/sessions/abc123.jsonl",
       "/tmp",
     );
-    expect(result).toBe("/sessions/abc123/tasks");
+    expect(result).toBe(join("/sessions", "abc123", "tasks"));
   });
 
   it("handles parent session files without a .jsonl extension", () => {
@@ -26,7 +27,7 @@ describe("deriveSubagentSessionDir", () => {
       "/tmp",
     );
     // basename is "abc123" (no extension to strip)
-    expect(result).toBe("/sessions/abc123/tasks");
+    expect(result).toBe(join("/sessions", "abc123", "tasks"));
   });
 
   it("returns a temp directory when parentSessionFile is undefined", () => {

@@ -54,6 +54,7 @@ export class SubagentsServiceAdapter implements SubagentsService {
       description,
       model,
       maxTurns: options?.maxTurns,
+      maxRuntimeMinutes: options?.maxRuntimeMinutes,
       thinkingLevel: options?.thinkingLevel,
       inheritContext: options?.inheritContext,
       bypassQueue: options?.bypassQueue,
