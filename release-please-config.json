@@ -17,14 +17,8 @@
     "packages/pi-permission-model-judge": {
       "component": "pi-permission-model-judge"
     },
-    "packages/pi-permission-system": {
-      "component": "pi-permission-system"
-    },
     "packages/pi-session-tools": {
       "component": "pi-session-tools"
-    },
-    "packages/pi-subagents": {
-      "component": "pi-subagents"
     },
     "packages/pi-subagents-worktrees": {
       "component": "pi-subagents-worktrees"
@@ -45,17 +39,8 @@
     "packages/pi-nocd/docs/retro",
     "packages/pi-permission-model-judge/docs/plans",
     "packages/pi-permission-model-judge/docs/retro",
-    "packages/pi-permission-system/docs/architecture",
-    "packages/pi-permission-system/docs/assets",
-    "packages/pi-permission-system/docs/decisions",
-    "packages/pi-permission-system/docs/plans",
-    "packages/pi-permission-system/docs/retro",
     "packages/pi-session-tools/docs/plans",
     "packages/pi-session-tools/docs/retro",
-    "packages/pi-subagents/docs/architecture",
-    "packages/pi-subagents/docs/decisions",
-    "packages/pi-subagents/docs/plans",
-    "packages/pi-subagents/docs/retro",
     "packages/pi-subagents-worktrees/docs/plans",
     "packages/pi-subagents-worktrees/docs/retro"
   ],

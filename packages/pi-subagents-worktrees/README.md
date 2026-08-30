@@ -55,4 +55,4 @@ That flag was removed from the core; install this package and list the agent typ
 
 MIT
 
-[ADR-0002]: https://github.com/gotgenes/pi-packages/blob/main/packages/pi-subagents/docs/decisions/0002-extensions-on-a-minimal-core.md
+[ADR-0002]: https://github.com/sycghj/pi-subagents/blob/main/docs/decisions/0002-extensions-on-a-minimal-core.md

@@ -1,17 +1,20 @@
 # pi-packages
 
 A monorepo of [Pi](https://github.com/badlogic/pi-mono) extension packages, originally published to npm under `@gotgenes/`.
-This fork maintains and publishes [`@sycghj/pi-permission-system`](./packages/pi-permission-system/) independently; the other packages remain attributed to their upstream `@gotgenes/` releases.
+The maintained forks have moved to standalone repositories; this repository retains the remaining upstream-attributed packages.
 
-本 fork 维护的权限扩展认可并支持 [LINUX DO](https://linux.do/) 社区开放、友善、共同创造价值的理念，感谢社区为中文开发者提供交流与分享的平台。
+## Extracted projects
+
+- [`@sycghj/pi-permission-system`](https://github.com/sycghj/pi-permission-system) — permission enforcement for the Pi coding agent
+- [`@sycghj/pi-subagents`](https://github.com/sycghj/pi-subagents) — focused, in-process autonomous sub-agent core
+
+The extracted repositories preserve both their pre-monorepo and monorepo histories.
 
 ## Packages
 
 | Package                                                                      | Description                                                     | Downloads/month                                                                                                                                |
 | ---------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [@sycghj/pi-permission-system](./packages/pi-permission-system/)             | Maintained fork: permission enforcement for the Pi coding agent | [![npm](https://img.shields.io/npm/dm/@sycghj/pi-permission-system)](https://www.npmjs.com/package/@sycghj/pi-permission-system)               |
 | [@gotgenes/pi-permission-model-judge](./packages/pi-permission-model-judge/) | Deny-first typo-path model judge for pi-permission-system       | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-permission-model-judge)](https://www.npmjs.com/package/@gotgenes/pi-permission-model-judge) |
-| [@gotgenes/pi-subagents](./packages/pi-subagents/)                           | Focused, in-process autonomous sub-agent core for Pi            | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-subagents)](https://www.npmjs.com/package/@gotgenes/pi-subagents)                           |
 | [@gotgenes/pi-github-tools](./packages/pi-github-tools/)                     | Deterministic GitHub CI, release, and issue tools               | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-github-tools)](https://www.npmjs.com/package/@gotgenes/pi-github-tools)                     |
 | [@gotgenes/pi-autoformat](./packages/pi-autoformat/)                         | Prompt-end auto-formatting (Biome, Prettier, etc.)              | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-autoformat)](https://www.npmjs.com/package/@gotgenes/pi-autoformat)                         |
 | [@gotgenes/pi-colgrep](./packages/pi-colgrep/)                               | Semantic code search via ColGrep as an agent tool               | [![npm](https://img.shields.io/npm/dm/@gotgenes/pi-colgrep)](https://www.npmjs.com/package/@gotgenes/pi-colgrep)                               |
@@ -23,13 +26,13 @@ Each package has its own README with setup instructions, usage, and configuratio
 
 ## Install
 
-Install the permission-system release maintained by this fork:
+Install the extracted permission-system release:
 
 ```bash
 pi install npm:@sycghj/pi-permission-system
 ```
 
-The remaining packages listed above are upstream `@gotgenes/` releases.
+The packages listed above are upstream `@gotgenes/` releases.
 Install every upstream package at once:
 
 ```bash
@@ -220,8 +223,6 @@ Load the relevant skill before working on a package:
 
 - `package-pi-autoformat` — for `packages/pi-autoformat/`
 - `package-pi-github-tools` — for `packages/pi-github-tools/`
-- `package-pi-permission-system` — for `packages/pi-permission-system/`
-- `package-pi-subagents` — for `packages/pi-subagents/`
 
 The remaining packages (`pi-colgrep`, `pi-session-tools`, `pi-subagents-worktrees`, `pi-nocd`, `pi-permission-model-judge`) have no dedicated skill — their READMEs cover everything you need.
 
