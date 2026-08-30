@@ -1,8 +1,8 @@
 ---
 name: package-pi-subagents
 description: |
-  Package-specific context for @gotgenes/pi-subagents.
-  Load when working on code, tests, or docs in packages/pi-subagents/.
+  Package-specific context for @sycghj/pi-subagents.
+  Load when working on code, tests, or docs in the standalone pi-subagents repository.
 ---
 
 # pi-subagents
@@ -110,7 +110,7 @@ This package publishes two public subpath entries, each with a rolled self-conta
 | `.`          | `src/service/service.ts`  | `dist/public.d.ts`   | Cross-extension service contract: spawn/abort/steer/workspace seam |
 | `./settings` | `src/layered-settings.ts` | `dist/settings.d.ts` | Generic layered JSON config loader for `@gotgenes/pi-*` extensions |
 
-Use `loadLayeredSettings<T>({ agentDir, cwd, filename, sanitize, warnLabel })` from `@gotgenes/pi-subagents/settings` to read global + project JSON config with the standard `@gotgenes/pi-*` layering convention.
+Use `loadLayeredSettings<T>({ agentDir, cwd, filename, sanitize, warnLabel })` from `@sycghj/pi-subagents/settings` to read global + project JSON config with the standard `@gotgenes/pi-*` layering convention.
 See the `## For Extension Authors` section of `README.md` for the full wiring example.
 
 ## Build
@@ -140,5 +140,5 @@ When working in this package:
 2. The upstream test suite is run periodically as a regression canary for the session assembly core.
 3. Modules marked `← removing` or `← replacing` in the architecture doc's current-state listing are slated for deletion - do not add features to them.
 
-[ADR-0002]: https://github.com/gotgenes/pi-packages/blob/main/packages/pi-subagents/docs/decisions/0002-extensions-on-a-minimal-core.md
-[ADR-0003]: https://github.com/gotgenes/pi-packages/blob/main/packages/pi-subagents/docs/decisions/0003-publish-bundled-type-declarations.md
+[ADR-0002]: https://github.com/sycghj/pi-subagents/blob/main/docs/decisions/0002-extensions-on-a-minimal-core.md
+[ADR-0003]: https://github.com/sycghj/pi-subagents/blob/main/docs/decisions/0003-publish-bundled-type-declarations.md
